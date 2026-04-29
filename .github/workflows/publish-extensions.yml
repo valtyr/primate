@@ -65,5 +65,10 @@ jobs:
           extension-name: primate
           extension-path: editors/zed
           push-to: valtyr/zed-extensions
+          # Pass the tag explicitly: under `workflow_dispatch` the
+          # default `github.ref` is `refs/heads/main`, which the action
+          # rejects with "invalid ref: refs/heads/main". Under a real
+          # tag-push trigger this fall-through would still be correct.
+          tag-name: ${{ inputs.tag || github.ref_name }}
         env:
           COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}

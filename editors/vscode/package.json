@@ -3,6 +3,12 @@
   "displayName": "primate",
   "description": "LSP client for primate",
   "version": "0.1.1",
+  "publisher": "valtyr",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/valtyr/primate.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
