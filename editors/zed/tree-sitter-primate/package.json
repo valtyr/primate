@@ -1,0 +1,13 @@
+{
+  "name": "tree-sitter-primate",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for primate",
+  "main": "bindings/node",
+  "scripts": {
+    "build": "tree-sitter generate",
+    "test": "tree-sitter test"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.22.0"
+  }
+}

@@ -1,0 +1,24 @@
+#:schema ./editors/vscode/primate.schema.json
+
+# primate configuration for the primate project itself
+
+input = "./examples/constants"
+
+[[output]]
+generator = "rust"
+path = "./examples/generated/constants.rs"
+options.visibility = "pub"
+options.prelude = "#![allow(dead_code)]"
+
+[[output]]
+generator = "typescript"
+path = "./examples/generated/ts/"
+options.naming = "camelCase"
+options.duration = "temporal"
+options.prelude = "/* eslint-disable */"
+
+[[output]]
+generator = "python"
+path = "./examples/generated/py/"
+options.typing = "runtime"
+options.prelude = "# ruff: noqa"

@@ -1,0 +1,72 @@
+{
+  "name": "primate-vscode",
+  "displayName": "primate",
+  "description": "LSP client for primate",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:primate",
+    "workspaceContains:**/*.prim",
+    "workspaceContains:**/primate.toml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "primate",
+        "aliases": ["primate"],
+        "extensions": [".prim"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "primate",
+        "scopeName": "source.primate",
+        "path": "./primate.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "primate",
+      "properties": {
+        "primate.server.path": {
+          "type": "string",
+          "default": "primate",
+          "description": "Path to the primate executable. Defaults to 'primate' (must be in PATH)."
+        }
+      }
+    },
+    "jsonValidation": [
+      {
+        "fileMatch": "primate.toml",
+        "url": "./primate.schema.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "primate.restartServer",
+        "title": "primate: Restart LSP Server",
+        "category": "primate"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -b",
+    "watch": "tsc -b -w"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

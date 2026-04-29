@@ -1,0 +1,16 @@
+[book]
+title = "primate"
+authors = ["Valtýr Örn Kjartansson"]
+description = "Cross-language constant transpiler."
+src = "src"
+language = "en"
+
+[output.html]
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
+smart-punctuation = true
+additional-js = ["theme/primate-hljs.js"]
+
+[output.html.fold]
+enable = true
+level = 1

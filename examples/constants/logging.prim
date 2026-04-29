@@ -1,0 +1,34 @@
+//! Logging configuration.
+
+/// Severity level. Integer-backed for fast filtering on the hot path.
+enum LogLevel: u8 {
+    /// Verbose logs intended for development.
+    Debug = 0,
+    /// Normal operational logs.
+    Info  = 1,
+    /// Something went wrong but the app continued.
+    Warn  = 2,
+    /// Something went wrong and the operation failed.
+    Error = 3,
+}
+
+/// Output format for log records.
+enum LogFormat {
+    /// One JSON object per line.
+    Json,
+    /// Plain key=value text, one record per line.
+    Text,
+    /// Human-readable, colorized; for local development only.
+    Pretty,
+}
+
+/// Default severity in production.
+LogLevel DEFAULT_LEVEL = Info
+
+/// Default output format in production.
+LogFormat DEFAULT_FORMAT = Pretty
+
+/// How often the in-memory log buffer is flushed to disk.
+duration FLUSH_INTERVAL = 20min
+
+u32 TEST_BYTE_SIZE = 400KB

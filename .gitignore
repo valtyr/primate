@@ -1,0 +1,26 @@
+/target
+.DS_Store
+
+*.sourcemap.json
+
+editors/*/node_modules
+editors/*/out
+editors/*/target
+editors/vscode/tsconfig.tsbuildinfo
+examples/generated
+
+# Zed extension build artifacts: grammar cache (cloned via file:// + path)
+# and the compiled extension wasm.
+editors/zed/grammars/
+editors/zed/extension.wasm
+
+# mdBook output
+docs/book/
+
+# Personal / editor / tool configs
+/.vscode/
+/.config/
+/.tool-versions
+/crush.json
+/llms.md
+/AGENTS.md

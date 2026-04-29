@@ -1,0 +1,687 @@
+RFC-0001: primate — Cross-Language Constant Transpiler
+
+Status: Draft
+Author: Valtýr Örn Kjartansson
+Updated: 2026-01-27
+
+================================================================
+1. Overview
+================================================================
+
+primate generates strongly-typed constant modules for Rust,
+TypeScript, and Python from a single TOML source.
+
+Goals:
+- Single source of truth for constants across languages
+- Semantic equivalence guaranteed
+- Doc comments preserved
+- IDE navigation to source files
+- Deterministic output
+- Extensible via plugins for additional languages
+
+Non-goals:
+- Runtime expressions or interpolation
+- Secrets or environment variables
+- Conditional compilation
+
+================================================================
+2. Input Format
+================================================================
+
+Extension: .c.toml
+
+Directory structure maps to namespaces:
+
+    constants/
+      time.c.toml        → time
+      limits.c.toml      → limits
+      math/
+        linear.c.toml    → math.linear
+
+Override namespace with:
+
+    __namespace__ = "core.time"
+
+----------------------------------------------------------------
+2.1 Constants
+----------------------------------------------------------------
+
+    NAME = { type = "<type>", value = <value> }
+
+Names must be SCREAMING_SNAKE_CASE and unique per namespace.
+
+----------------------------------------------------------------
+2.2 Documentation
+----------------------------------------------------------------
+
+Lines starting with ## become doc comments. Only contiguous
+leading comments are captured; blank lines break grouping.
+
+    ## Maximum retry attempts before giving up.
+    ## Consider network conditions when tuning.
+    MAX_RETRIES = { type = "u32", value = 5 }
+
+================================================================
+3. Configuration
+================================================================
+
+primate.toml in the project root defines inputs and outputs.
+
+----------------------------------------------------------------
+3.1 Minimal Example
+----------------------------------------------------------------
+
+    input = "./constants"
+
+    [[output]]
+    generator = "typescript"
+    path = "./src/generated/constants.ts"
+
+----------------------------------------------------------------
+3.2 Full Example
+----------------------------------------------------------------
+
+    input = "./constants"
+
+    [[output]]
+    generator = "typescript"
+    path = "./src/generated/constants.ts"
+    options.naming = "camelCase"
+    options.duration = "temporal"
+    options.bytes = "number"
+
+    [[output]]
+    generator = "rust"
+    path = "./src/constants.rs"
+    options.visibility = "pub(crate)"
+
+    [[output]]
+    generator = "python"
+    path = "./python/constants.py"
+
+    [[output]]
+    plugin = "swift"
+    path = "./Sources/Constants.swift"
+    options.access = "public"
+
+    [[output]]
+    plugin = "./tools/my-generator"
+    path = "./custom/constants.xyz"
+
+----------------------------------------------------------------
+3.3 Fields
+----------------------------------------------------------------
+
+input (required)
+    Path to directory containing .c.toml files.
+
+[[output]] (required, at least one)
+    generator   Built-in generator: "typescript", "rust", "python"
+    plugin      External plugin name or path. Resolves as:
+                - "swift" → primate-gen-swift (in $PATH)
+                - "./path" → local executable
+                - "~/.primate/plugins/name" fallback
+    path        Output file or directory.
+    options     Generator-specific settings (optional).
+
+Exactly one of `generator` or `plugin` must be specified.
+
+----------------------------------------------------------------
+3.4 Built-in Generator Options
+----------------------------------------------------------------
+
+TypeScript:
+    naming      "camelCase" (default) | "SCREAMING_SNAKE_CASE"
+    duration    "number" (ms, default) | "temporal" (Temporal.Duration)
+    bytes       "number" (default) | "bigint"
+    enumStyle   "literal" (default) | "const" | "enum"
+
+Rust:
+    visibility  "pub" (default) | "pub(crate)" | "pub(super)" | ""
+
+Python:
+    typing      "runtime" (default) | "stub" (emit .pyi only)
+
+----------------------------------------------------------------
+3.5 CLI Override
+----------------------------------------------------------------
+
+    primate                      # uses ./primate.toml
+    primate -c other.toml        # explicit config
+    primate ./constants -o ts:./out.ts   # inline, no config
+
+================================================================
+4. Types
+================================================================
+
+----------------------------------------------------------------
+4.1 Scalars
+----------------------------------------------------------------
+
+i32, i64, u32, u64, f32, f64, bool, string
+
+----------------------------------------------------------------
+4.2 Duration
+----------------------------------------------------------------
+
+Type: duration
+Formats: 150ms, 5s, 3m, 2h, 1h30m, 2d
+Internal: nanoseconds (u64)
+
+    TIMEOUT = { type = "duration", value = "30s" }
+
+Output conversion (configurable):
+- TypeScript: milliseconds (number) or Temporal.Duration
+- Rust: std::time::Duration
+- Python: datetime.timedelta
+
+----------------------------------------------------------------
+4.3 Byte Size
+----------------------------------------------------------------
+
+Type: bytes
+Formats: KB, MB, GB, TB, KiB, MiB, GiB, TiB
+Internal: bytes (u64)
+
+    MAX_UPLOAD = { type = "bytes", value = "50MiB" }
+
+Output: always as integer (bytes). TypeScript can optionally
+emit as bigint for values exceeding Number.MAX_SAFE_INTEGER.
+
+----------------------------------------------------------------
+4.4 Containers
+----------------------------------------------------------------
+
+    T[]              array
+    T[][]            nested array
+    map<K,V>         key-value map
+    tuple<T1,T2>     fixed-size tuple
+    optional<T>      nullable value
+
+----------------------------------------------------------------
+4.5 Enums
+----------------------------------------------------------------
+
+Simple string enum:
+
+    STATUS = { type = "enum", variants = ["pending", "active", "done"] }
+
+With explicit backing values (strings):
+
+    HTTP_METHOD = {
+      type = "enum",
+      variants = { Get = "GET", Post = "POST", Delete = "DELETE" }
+    }
+
+With integer backing values:
+
+    LOG_LEVEL = {
+      type = "enum",
+      variants = { Debug = 0, Info = 1, Warn = 2, Error = 3 }
+    }
+
+Variant naming for array-style enums:
+
+When using array syntax, variant names are derived from values:
+- Rust: PascalCase (pending → Pending)
+- Python: SCREAMING_SNAKE (pending → PENDING)
+- TypeScript: values used directly in union type
+
+For explicit control over variant names, use object syntax.
+
+Output by language:
+
+TypeScript (string enum):
+
+    export type Status = "pending" | "active" | "done";
+    export const Status = ["pending", "active", "done"] as const;
+
+TypeScript (explicit string values):
+
+    export type HttpMethod = "GET" | "POST" | "DELETE";
+    export const HttpMethod = {
+      Get: "GET",
+      Post: "POST",
+      Delete: "DELETE",
+    } as const;
+
+TypeScript (integer enum):
+
+    export enum LogLevel {
+      Debug = 0,
+      Info = 1,
+      Warn = 2,
+      Error = 3,
+    }
+
+Rust:
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Status {
+        Pending,
+        Active,
+        Done,
+    }
+
+    impl Status {
+        pub const fn as_str(&self) -> &'static str {
+            match self {
+                Self::Pending => "pending",
+                Self::Active => "active",
+                Self::Done => "done",
+            }
+        }
+    }
+
+    // Integer-backed:
+    #[repr(i32)]
+    pub enum LogLevel {
+        Debug = 0,
+        Info = 1,
+        Warn = 2,
+        Error = 3,
+    }
+
+Python:
+
+    class Status(str, Enum):
+        PENDING = "pending"
+        ACTIVE = "active"
+        DONE = "done"
+
+    class LogLevel(IntEnum):
+        DEBUG = 0
+        INFO = 1
+        WARN = 2
+        ERROR = 3
+
+----------------------------------------------------------------
+4.6 Struct
+----------------------------------------------------------------
+
+    POINT = {
+      type = "struct",
+      value = { x = 0.0, y = 0.0, z = 0.0 }
+    }
+
+Field types inferred from values or explicit:
+
+    POINT = {
+      type = "struct",
+      fields = { x = "f64", y = "f64", z = "f64" },
+      value = { x = 0.0, y = 0.0, z = 0.0 }
+    }
+
+----------------------------------------------------------------
+4.7 Special Types
+----------------------------------------------------------------
+
+    regex    Validated at generation time per language
+    url      Validated URL string
+
+================================================================
+5. Naming Conventions
+================================================================
+
+Input: SCREAMING_SNAKE_CASE (required)
+
+Output:
+- Rust: SCREAMING_SNAKE_CASE
+- TypeScript: camelCase (configurable)
+- Python: SCREAMING_SNAKE_CASE
+
+Reserved keywords get trailing underscore (e.g., type_).
+
+================================================================
+6. Plugin System
+================================================================
+
+External tools can implement new language targets without
+modifying primate. Plugins are standalone executables that
+receive the IR on stdin and write generated files to stdout.
+
+----------------------------------------------------------------
+6.1 Invocation
+----------------------------------------------------------------
+
+Plugins are configured via the `plugin` field in primate.toml:
+
+    [[output]]
+    plugin = "swift"
+    path = "./Sources/Constants.swift"
+
+primate resolves the plugin name:
+1. If path (starts with `.` or `/`): use directly
+2. Otherwise: lookup `primate-gen-<name>` in $PATH
+3. Fallback: ~/.primate/plugins/<name>
+
+----------------------------------------------------------------
+6.2 Protocol
+----------------------------------------------------------------
+
+primate writes a JSON CodeGenRequest to the plugin's stdin.
+The plugin writes a JSON CodeGenResponse to stdout, then exits.
+
+Request schema:
+
+    {
+      "version": 1,
+      "outputPath": "./Sources/Constants.swift",  // from config
+      "options": { ... },                         // from config options
+      "modules": [{
+        "namespace": "time",
+        "sourceFile": "constants/time.c.toml",
+        "doc": "Time-related constants",
+        "constants": [{
+          "name": "OFFLINE_THRESHOLD",
+          "doc": "Duration before marking offline",
+          "type": { "kind": "duration" },
+          "value": { "nanoseconds": 300000000000 },
+          "source": { "line": 14, "column": 1 }
+        }]
+      }],
+      "enums": [{
+        "name": "Status",
+        "namespace": "core",
+        "doc": "User status",
+        "variants": [
+          { "name": "Pending", "value": "pending" },
+          { "name": "Active", "value": "active" }
+        ],
+        "backingType": "string",
+        "source": { "file": "core.c.toml", "line": 5 }
+      }]
+    }
+
+Response schema:
+
+    {
+      "files": [
+        { "path": "Constants.swift", "content": "..." },
+        { "path": "Constants.swift.map", "content": "..." }
+      ],
+      "errors": [{                 // optional
+        "message": "...",
+        "source": { "file": "...", "line": 1 }
+      }]
+    }
+
+Files are written atomically by primate. Paths are relative to
+the configured output path. Sourcemaps and any auxiliary files
+are just additional entries — primate doesn't interpret them.
+
+----------------------------------------------------------------
+6.3 Type Representation in IR
+----------------------------------------------------------------
+
+Types are represented as tagged objects:
+
+    { "kind": "i32" }
+    { "kind": "duration" }
+    { "kind": "bytes" }
+    { "kind": "array", "element": { "kind": "string" } }
+    { "kind": "map", "key": { "kind": "string" }, "value": { "kind": "i32" } }
+    { "kind": "optional", "inner": { "kind": "string" } }
+    { "kind": "tuple", "elements": [{ "kind": "i32" }, { "kind": "string" }] }
+    { "kind": "enum", "name": "Status" }
+    { "kind": "struct", "fields": { "x": { "kind": "f64" } } }
+
+Values are normalized:
+
+    Durations: { "nanoseconds": 123456789 }
+    Bytes: { "bytes": 1048576 }
+    Enums: { "variant": "Active", "value": "active" }
+    Structs: { "x": 0.0, "y": 1.0 }
+    Scalars: raw JSON values
+
+----------------------------------------------------------------
+6.4 Options
+----------------------------------------------------------------
+
+Pass options to plugins via primate.toml:
+
+    [[output]]
+    plugin = "swift"
+    path = "./Sources/Constants.swift"
+    [output.options]
+    access = "public"
+
+Options are passed in the request's `options` field as a
+key-value map. Each plugin defines its own option schema.
+
+----------------------------------------------------------------
+6.5 Error Handling
+----------------------------------------------------------------
+
+- Exit 0: success, read response from stdout
+- Exit 1: failure, response may contain errors array
+- Exit >1: crash, primate reports plugin failure
+
+Plugins should validate they support the request version and
+fail gracefully if not.
+
+----------------------------------------------------------------
+6.6 Plugin Development
+----------------------------------------------------------------
+
+Plugins can be written in any language. Minimal implementation:
+
+1. Read JSON from stdin
+2. Parse into native structures
+3. Generate code for each module
+4. Write JSON response to stdout
+
+primate provides:
+- JSON schema files for request/response validation
+- Reference implementations in Rust, TypeScript, Python
+- Test fixtures for common cases
+
+================================================================
+7. Source Mapping
+================================================================
+
+Enables IDE "go to definition" for generated constants.
+
+----------------------------------------------------------------
+7.1 TypeScript
+----------------------------------------------------------------
+
+Standard .js.map files mapping to .c.toml sources.
+Full VS Code support out of the box (Go to Definition, Cmd-click).
+
+----------------------------------------------------------------
+7.2 Other Languages
+----------------------------------------------------------------
+
+Rust and Python lack standard source map formats for mapping
+to external non-code files. Two approaches are supported:
+
+1. primate LSP (recommended)
+
+   The `primate lsp` command provides Go to Definition for
+   generated files, navigating directly to .c.toml sources.
+   Works uniformly across all output languages.
+
+2. VS Code extension + primate.sourcemap.json
+
+   primate emits a unified sourcemap file. The primate VS Code
+   extension uses this to intercept navigation in generated
+   files and jump to the original .c.toml source.
+
+----------------------------------------------------------------
+7.3 Generated File Comments
+----------------------------------------------------------------
+
+All generated files include a header comment:
+
+    // Generated by primate from constants/time.c.toml
+    // Do not edit manually.
+
+Individual constants in languages without source map support
+include human-readable source references:
+
+    // source: constants/time.c.toml:14
+    pub const TIMEOUT: Duration = ...
+
+----------------------------------------------------------------
+7.4 Sourcemap Format
+----------------------------------------------------------------
+
+primate.sourcemap.json schema:
+
+    {
+      "version": 1,
+      "entries": [{
+        "symbol": "time.OFFLINE_THRESHOLD",
+        "sourceFile": "constants/time.c.toml",
+        "sourceLine": 14,
+        "sourceColumn": 1,
+        "outputFile": "generated/time.ts",
+        "outputLine": 3
+      }]
+    }
+
+================================================================
+8. Diagnostics & LSP
+================================================================
+
+primate provides diagnostics before and during transpilation,
+with optional LSP support for real-time editor feedback.
+
+----------------------------------------------------------------
+8.1 CLI Commands
+----------------------------------------------------------------
+
+    primate check              # validate without generating
+    primate check --watch      # continuous validation
+    primate lsp                # start LSP server
+
+----------------------------------------------------------------
+8.2 Diagnostic Levels
+----------------------------------------------------------------
+
+Errors (block generation):
+- Unknown or invalid types
+- Parse failures (duration, size, regex, url)
+- Duplicate names in same namespace
+- Invalid identifiers
+- Type/value mismatch
+- Non-SCREAMING_SNAKE_CASE names
+- Enum value not in declared variants
+- Overflow during normalization
+
+Warnings (reported but don't block):
+- f64 > MAX_SAFE_INTEGER (when TypeScript output configured)
+- Duration precision loss (when converting to milliseconds)
+- Reserved keyword collision (auto-escaped, but flagged)
+- Unused namespace override
+
+Info:
+- Deprecated syntax hints
+- Style suggestions
+
+----------------------------------------------------------------
+8.3 Target-Aware Warnings
+----------------------------------------------------------------
+
+Diagnostics are aware of configured outputs. Warnings about
+JavaScript number limits only appear if TypeScript is a target.
+
+    # Only warns if [[output]] includes generator = "typescript"
+    BIG_NUMBER = { type = "u64", value = 9007199254740993 }
+
+----------------------------------------------------------------
+8.4 LSP Features
+----------------------------------------------------------------
+
+The LSP server (primate lsp) supports:
+- Real-time diagnostics as you type
+- Go to definition (for enum references, namespace overrides)
+- Hover documentation
+- Completion for type names and enum variants
+- Rename symbol (across files in namespace)
+
+Editor integration via standard LSP protocol. Configure your
+editor to use `primate lsp` as the language server for
+`.c.toml` files.
+
+----------------------------------------------------------------
+8.5 Diagnostic Output Format
+----------------------------------------------------------------
+
+    primate check --format=json
+
+    {
+      "diagnostics": [{
+        "file": "constants/time.c.toml",
+        "line": 14,
+        "column": 5,
+        "severity": "warning",
+        "code": "js-unsafe-integer",
+        "message": "Value exceeds MAX_SAFE_INTEGER for TypeScript",
+        "targets": ["typescript"]
+      }]
+    }
+
+----------------------------------------------------------------
+8.6 Editor Configuration
+----------------------------------------------------------------
+
+VS Code (settings.json):
+
+    {
+      "[toml]": {
+        "editor.defaultFormatter": null
+      },
+      "primate.configPath": "./primate.toml"
+    }
+
+Neovim (via nvim-lspconfig):
+
+    require('lspconfig').primate.setup{}
+
+================================================================
+9. Edge Cases
+================================================================
+
+- Byte size > u64: rejected
+- Empty containers: allowed with explicit type
+- Reserved keywords: auto-escaped per language
+- Circular namespace references: rejected
+
+================================================================
+10. Security
+================================================================
+
+No code execution, shell interpolation, environment access,
+or network access. Input is strictly data.
+
+Plugins run as separate processes with no special privileges.
+primate does not pass environment variables or secrets to
+plugins.
+
+================================================================
+11. Pipeline
+================================================================
+
+1. Discover .c.toml files
+2. Parse TOML (preserving comments)
+3. Validate and normalize
+4. Build IR
+5. Generate sourcemaps
+6. For built-in targets: emit output
+7. For plugins: serialize IR, invoke plugin, collect response
+
+================================================================
+12. Future Work
+================================================================
+
+- IDE plugins for native jump-to-source
+- Constant expressions
+- Import/include across files
+- Per-language overrides
+- Plugin registry/discovery
+
+================================================================
+END RFC-0001
+================================================================

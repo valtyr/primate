@@ -1,0 +1,53 @@
+[package]
+name = "primate"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A small DSL for cross-language constants. Write once, generate typed Rust, TypeScript, and Python."
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/valtyr/primate"
+homepage = "https://github.com/valtyr/primate"
+documentation = "https://docs.rs/primate"
+authors = ["Valtýr Örn Kjartansson <valtyr@gmail.com>"]
+keywords = ["codegen", "constants", "transpiler", "config", "dsl"]
+categories = ["development-tools", "command-line-utilities", "compilers"]
+exclude = [
+    "/docs/book",
+    "/editors",
+    "/examples/generated",
+    "/examples/test.ts",
+    "/rfc",
+    "/.github",
+    "/.vscode",
+    "/.config",
+    "/.tool-versions",
+    "/AGENTS.md",
+    "/crush.json",
+    "/llms.md",
+    "/package.json",
+    "/pnpm-lock.yaml",
+    "/pnpm-workspace.yaml",
+    "/primate.sourcemap.json",
+]
+
+[dependencies]
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+thiserror = "2.0"
+walkdir = "2.5"
+regex = "1.11"
+which = "7.0"
+dirs = "6.0"
+notify = "8.0"
+notify-debouncer-mini = "0.6"
+lsp-server = "0.7.9"
+lsp-types = "0.97.0"
+url = "2.5.8"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

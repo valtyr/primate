@@ -1,0 +1,15 @@
+{
+  "grammars": [
+    {
+      "name": "primate",
+      "scope": "source.primate",
+      "path": ".",
+      "file-types": ["const"]
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tree-sitter grammar for primate"
+  }
+}

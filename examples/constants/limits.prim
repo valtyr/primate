@@ -1,0 +1,22 @@
+//! Application-wide limits and thresholds.
+
+use logging::LogLevel
+use network::Port
+
+/// Maximum upload size for a single request.
+u64 MAX_UPLOAD_SIZE = 100MiB
+
+/// Maximum number of items returned per page in list endpoints.
+u32 PAGE_SIZE = 25
+
+/// Maximum number of concurrent users a single node will accept.
+u32 MAX_CONNECTED_USERS = 1024
+
+/// Time after which an idle session is considered offline.
+duration OFFLINE_THRESHOLD = 20min
+
+/// Severity at which the request handler starts recording stack traces.
+LogLevel STACKTRACE_THRESHOLD = Warn
+
+/// Port the admin/metrics endpoint binds to. Not exposed publicly.
+Port ADMIN_PORT = 9999

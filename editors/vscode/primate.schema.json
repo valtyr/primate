@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "primate Configuration",
+  "type": "object",
+  "required": ["input", "output"],
+  "properties": {
+    "input": {
+      "type": "string",
+      "description": "Path to the directory containing .c.toml files"
+    },
+    "output": {
+      "type": "array",
+      "description": "List of output targets",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "oneOf": [
+          { "required": ["generator"] },
+          { "required": ["plugin"] }
+        ],
+        "properties": {
+          "generator": {
+            "type": "string",
+            "enum": ["typescript", "rust", "python"],
+            "description": "Built-in generator to use"
+          },
+          "plugin": {
+            "type": "string",
+            "description": "Path to an external plugin executable"
+          },
+          "path": {
+            "type": "string",
+            "description": "Output file path (e.g., src/constants.ts) or directory"
+          },
+          "options": {
+            "type": "object",
+            "description": "Generator-specific options",
+            "properties": {
+              "typing": {
+                "type": "string",
+                "enum": ["runtime", "stub"],
+                "description": "Python: Generate runtime classes or type stubs"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

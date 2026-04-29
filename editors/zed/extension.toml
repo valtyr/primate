@@ -1,0 +1,23 @@
+id = "primate"
+name = "primate"
+description = "Language support for the primate constant DSL"
+version = "0.1.0"
+schema_version = 1
+authors = ["primate contributors"]
+repository = "https://github.com/example/primate"
+
+[language_servers.primate]
+name = "primate"
+languages = ["primate"]
+
+[grammars.primate]
+# Local development: point at the project's monorepo via `file://` and use
+# `path` to locate the grammar source within it. `rev = "main"` re-fetches
+# whatever's at the tip of main on every `zed: rebuild dev extension`, so
+# no commit-hash bumping is required.
+#
+# Before publishing: switch `repository` to the GitHub URL of the project
+# repo (or a dedicated tree-sitter-primate repo) and pin a commit SHA.
+repository = "file:///Users/valtyr/Universe/Code/cconstt"
+rev        = "main"
+path       = "editors/zed/tree-sitter-primate"
