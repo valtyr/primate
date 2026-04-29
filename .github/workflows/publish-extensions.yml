@@ -64,6 +64,6 @@ jobs:
         with:
           extension-name: primate
           extension-path: editors/zed
-          push-to: valtyr/extensions
+          push-to: valtyr/zed-extensions
         env:
           COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
