@@ -1,0 +1,17 @@
+[workspace]
+# Bot signature on the release PRs and commits.
+git_release_name = "v{{ version }}"
+git_tag_name     = "v{{ version }}"
+
+# Conventional commits drive version bumps:
+#   feat:     -> minor
+#   fix:      -> patch
+#   feat!: / BREAKING CHANGE: -> major
+# (release-plz's defaults; reproduced here for clarity.)
+changelog_update = true
+publish          = true
+
+[[package]]
+name = "primate"
+# Pre-1.0: keep the changelog informative but flexible.
+changelog_path = "CHANGELOG.md"

@@ -1,0 +1,51 @@
+name: Release-plz
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  pull-requests: write
+  contents: write
+
+# release-plz reads git state and a remote crates.io index, so concurrent
+# runs against the same ref would race.
+concurrency:
+  group: release-plz-${{ github.ref }}
+
+jobs:
+  # Opens (or updates) a "chore: release" PR with the next version number
+  # and an updated CHANGELOG, derived from conventional-commit messages
+  # since the last release.
+  release-pr:
+    name: release-pr
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Runs on every push to main; release-plz internally detects when a
+  # release PR has just been merged and only then publishes to crates.io,
+  # creates a GitHub Release, and pushes the v* tag.
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

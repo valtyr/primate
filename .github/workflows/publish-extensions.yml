@@ -1,0 +1,73 @@
+name: Publish extensions
+
+# Triggered by the v* tag that release-plz pushes after a release. The
+# editor extensions live in editors/ and are versioned in lockstep with
+# the crate.
+on:
+  push:
+    tags: ['v*']
+  # Allow manual re-runs in case a marketplace publish fails the first time.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.1.1)'
+        required: true
+
+jobs:
+  vscode:
+    name: VS Code Marketplace + Open VSX
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # The VS Code extension's package.json should already match the
+      # release version (release-plz's PR bumps it). If not, fail loudly
+      # rather than publish a stale version.
+      - name: Verify version matches tag
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ inputs.tag }}" != "" ]; then
+            TAG_VERSION="${{ inputs.tag }}"
+            TAG_VERSION="${TAG_VERSION#v}"
+          fi
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run build --if-present
+      - name: Publish to VS Code Marketplace
+        run: npx --yes @vscode/vsce publish --pat "$VSCE_PAT"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: Publish to Open VSX
+        run: npx --yes ovsx publish --pat "$OVSX_PAT"
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+  zed:
+    name: Zed extensions registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      # Opens a PR against zed-industries/extensions that bumps the
+      # `primate` entry. The action expects a fork to push to; set
+      # `push-to` to the user's fork (a one-time `gh repo fork
+      # zed-industries/extensions` is required).
+      - uses: huacnlee/zed-extension-action@v1
+        with:
+          extension-name: primate
+          extension-path: editors/zed
+          push-to: valtyr/extensions
+        env:
+          COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
