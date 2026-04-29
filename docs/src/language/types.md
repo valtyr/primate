@@ -22,6 +22,29 @@ generators simple. (When fixed-size arrays of `u8` are useful — e.g.
 RGB triples — they're *value types*, not constants in the bit-twiddling
 sense; see [fixed-size arrays](#fixed-size-arrays).)
 
+#### A note on type fidelity
+
+primate's numeric types are richer than what most targets natively
+distinguish. Each generator preserves what the target supports and
+widens the rest — `i32` and `u32` survive faithfully into Rust, but
+land as `number` in TypeScript and `int` in Python. The full mapping:
+
+| primate     | Rust                       | TypeScript                                | Python      |
+| ----------- | -------------------------- | ----------------------------------------- | ----------- |
+| `i8`–`i64`  | `i8` / `i16` / `i32` / `i64` | `number`                                | `int`       |
+| `u8`–`u64`  | `u8` / `u16` / `u32` / `u64` | `number` (or `bigint` for `u64` opt-in) | `int`       |
+| `f32` / `f64` | `f32` / `f64`            | `number`                                  | `float`     |
+| `duration`  | `std::time::Duration`      | `number` (ms) or `Temporal.Duration`      | `timedelta` |
+| `string`    | `&'static str`             | `string`                                  | `str`       |
+| `regex`     | `&'static str`             | `string`                                  | `str`       |
+| `url`       | `&'static str`             | `string`                                  | `str`       |
+
+This widening only affects the *type annotation* in generated code;
+the values themselves are bounds-checked against the declared primate
+type at parse time, not at generation time. `u32 X = 5GiB` is an
+`out-of-range` error before any generator sees it, even though the
+TypeScript output would have been `number`.
+
 ### Boolean
 
 ```primate

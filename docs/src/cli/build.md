@@ -73,6 +73,11 @@ options.enumStyle = "literal"        # or "const", "enum"
 Defaults are conservative: `camelCase` constants, `number` durations
 in milliseconds, `number` for `u64`, string-literal enums.
 
+TypeScript doesn't distinguish between `i32`, `u32`, `i64`, `f64`,
+etc. — they all land as `number`. Bounds checking happens at primate's
+parse time against the declared type. See
+[type fidelity](../language/types.md#a-note-on-type-fidelity).
+
 ### `rust`
 
 `path` is a file. primate emits one `.rs` file with a `pub mod <ns>`
@@ -85,6 +90,10 @@ generator = "rust"
 path      = "src/generated/constants.rs"
 options.visibility = "pub"           # or "pub(crate)", "pub(super)", ""
 ```
+
+Rust is the highest-fidelity target — `i32`/`u32`/`i64`/`u64`/`f32`/
+`f64` all survive as native types. See
+[type fidelity](../language/types.md#a-note-on-type-fidelity).
 
 ### `python`
 
@@ -102,6 +111,11 @@ options.typing = "runtime"           # or "stub" (emits a .pyi-style file)
 
 Durations become `timedelta`. Integer-backed enums become `IntEnum`
 subclasses; string-tagged enums become `(str, Enum)` subclasses.
+
+Python doesn't distinguish between integer widths — `i32`, `u32`,
+`i64`, and `u64` all land as `int`. Bounds checking happens at
+primate's parse time against the declared type. See
+[type fidelity](../language/types.md#a-note-on-type-fidelity).
 
 ## Why a directory for TS and Python, but a file for Rust?
 
