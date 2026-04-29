@@ -48,10 +48,6 @@ jobs:
         run: npx --yes @vscode/vsce publish --pat "$VSCE_PAT"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      - name: Publish to Open VSX
-        run: npx --yes ovsx publish --pat "$OVSX_PAT"
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
   zed:
     name: Zed extensions registry

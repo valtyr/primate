@@ -3,7 +3,7 @@
 primate ships three artifacts on each release:
 
 1. The Rust crate `primate` on **crates.io**.
-2. The VS Code extension on the **VS Code Marketplace** and **Open VSX**.
+2. The VS Code extension on the **VS Code Marketplace**.
 3. The Zed extension on **zed-industries/extensions**.
 
 All three are versioned in lockstep — the version in `Cargo.toml`,
@@ -38,8 +38,12 @@ the GitHub repo:
 | ----------------------- | ------------------------------------------------------- | ------------- |
 | `CARGO_REGISTRY_TOKEN`  | `cargo publish` to crates.io.                           | <https://crates.io/settings/tokens> — needs `publish-update` for `primate`. |
 | `VSCE_PAT`              | `vsce publish` to VS Code Marketplace.                  | Azure DevOps PAT, scope **Marketplace → Manage**. <https://aka.ms/vscode-marketplace-manage-publishers> |
-| `OVSX_PAT`              | `ovsx publish` to Open VSX.                             | <https://open-vsx.org/user-settings/tokens> |
 | `COMMITTER_TOKEN`       | Open the PR to `zed-industries/extensions`.             | GitHub PAT (classic) with **repo** + **workflow** scopes. The PAT's user must have a fork of `zed-industries/extensions` named in the workflow's `push-to:` field. |
+
+To also publish to **Open VSX** (the open-source registry used by
+VSCodium et al.), add a step that runs `npx --yes ovsx publish --pat
+"$OVSX_PAT"` in the `vscode` job and add `OVSX_PAT` as a secret —
+generated at <https://open-vsx.org/user-settings/tokens>.
 
 ## Lockstep
 
