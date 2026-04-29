@@ -42,7 +42,9 @@ jobs:
             echo "package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
             exit 1
           fi
-      - run: npm ci
+      # `npm install` instead of `npm ci` so this also works on tags
+      # that predate the lockfile (e.g. when re-running v0.1.1).
+      - run: npm install --no-audit --no-fund
       - run: npm run build --if-present
       - name: Publish to VS Code Marketplace
         run: npx --yes @vscode/vsce publish --pat "$VSCE_PAT"
