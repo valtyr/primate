@@ -58,10 +58,13 @@ jobs:
           VERSION=$(awk -F'"' '/^version = / { print $2; exit }' Cargo.toml)
           echo "Syncing editor manifests to $VERSION"
 
-          # editors/vscode/package.json — `npm pkg set` rewrites only the
-          # changed key in place and preserves the rest of the file's
-          # formatting (including inline arrays, key order, etc.).
-          (cd editors/vscode && npm pkg set "version=$VERSION")
+          # editors/vscode/package.json — bump just the top-level
+          # `version` field via sed. We deliberately don't go through
+          # `npm pkg set` or jq because both round-trip the file through
+          # a JSON serializer that expands inline arrays and produces a
+          # noisy diff. The literal-text replacement is precise and
+          # leaves every other line untouched.
+          sed -i -E 's/^(\s*"version":\s*)"[^"]*"/\1"'"$VERSION"'"/' editors/vscode/package.json
 
           # editors/zed/extension.toml — single-line replacement of the
           # top-level `version = "..."` field.
