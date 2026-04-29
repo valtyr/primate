@@ -26,8 +26,8 @@ Authoring a release is a PR-based flow driven by **release-plz**:
 3. Merge the PR. release-plz publishes `primate` to crates.io,
    creates a GitHub Release, and pushes a `vX.Y.Z` tag.
 4. The `Publish extensions` workflow fires on the tag and publishes
-   the VS Code extension to the Marketplace + Open VSX, and opens a
-   PR to `zed-industries/extensions` for the Zed extension.
+   the VS Code extension to the Marketplace, and opens a PR to
+   `zed-industries/extensions` for the Zed extension.
 
 ## Required secrets
 
