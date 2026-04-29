@@ -19,12 +19,8 @@
     "languages": [
       {
         "id": "primate",
-        "aliases": [
-          "primate"
-        ],
-        "extensions": [
-          ".prim"
-        ],
+        "aliases": ["primate"],
+        "extensions": [".prim"],
         "configuration": "./language-configuration.json"
       }
     ],
