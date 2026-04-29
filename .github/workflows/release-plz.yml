@@ -14,18 +14,43 @@ concurrency:
   group: release-plz-${{ github.ref }}
 
 jobs:
-  # Opens (or updates) a "chore: release" PR with the next version number
-  # and an updated CHANGELOG, derived from conventional-commit messages
-  # since the last release. After release-plz creates or refreshes the PR
-  # branch, the next step pushes a follow-up commit that bumps the editor
-  # extension manifests so they ship in lockstep with the crate.
-  release-pr:
-    name: release-pr
+  # Run on every push to main. release-plz internally detects when a
+  # release PR has just been merged and only then publishes to crates.io,
+  # creates a GitHub Release, and pushes the v* tag.
+  #
+  # The token is a PAT (RELEASE_TOKEN) rather than the default
+  # GITHUB_TOKEN because GitHub does not trigger downstream workflows on
+  # events produced by GITHUB_TOKEN — so the v* tag pushed here would not
+  # fire `publish-extensions.yml`. With a PAT, the tag event propagates.
+  release:
+    name: release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Opens (or updates) a "chore: release" PR with the next version number
+  # and an updated CHANGELOG, derived from conventional-commit messages
+  # since the last release. Runs *after* `release` so it sees the just-
+  # pushed tag and doesn't try to re-release the version that just shipped.
+  release-pr:
+    name: release-pr
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
 
       - id: release-plz
@@ -33,14 +58,14 @@ jobs:
         with:
           command: release-pr
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Sync editor manifest versions
         if: ${{ steps.release-plz.outputs.pr != '' }}
         env:
           PR_JSON: ${{ steps.release-plz.outputs.pr }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
           BRANCH=$(echo "$PR_JSON" | jq -r '.head_branch // empty')
@@ -78,21 +103,3 @@ jobs:
           git add editors/vscode/package.json editors/zed/extension.toml
           git commit -m "chore: sync editor manifests to $VERSION"
           git push origin "$BRANCH"
-
-  # Runs on every push to main; release-plz internally detects when a
-  # release PR has just been merged and only then publishes to crates.io,
-  # creates a GitHub Release, and pushes the v* tag.
-  release:
-    name: release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: MarcoIeni/release-plz-action@v0.5
-        with:
-          command: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
