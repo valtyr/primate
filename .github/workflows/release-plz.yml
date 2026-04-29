@@ -16,7 +16,9 @@ concurrency:
 jobs:
   # Opens (or updates) a "chore: release" PR with the next version number
   # and an updated CHANGELOG, derived from conventional-commit messages
-  # since the last release.
+  # since the last release. After release-plz creates or refreshes the PR
+  # branch, the next step pushes a follow-up commit that bumps the editor
+  # extension manifests so they ship in lockstep with the crate.
   release-pr:
     name: release-pr
     runs-on: ubuntu-latest
@@ -25,12 +27,59 @@ jobs:
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      - uses: MarcoIeni/release-plz-action@v0.5
+
+      - id: release-plz
+        uses: MarcoIeni/release-plz-action@v0.5
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Sync editor manifest versions
+        if: ${{ steps.release-plz.outputs.pr != '' }}
+        env:
+          PR_JSON: ${{ steps.release-plz.outputs.pr }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH=$(echo "$PR_JSON" | jq -r '.head_branch // empty')
+          if [ -z "$BRANCH" ]; then
+            echo "release-plz did not produce a branch — nothing to sync"
+            exit 0
+          fi
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+
+          VERSION=$(awk -F'"' '/^version = / { print $2; exit }' Cargo.toml)
+          echo "Syncing editor manifests to $VERSION"
+
+          # editors/vscode/package.json — preserve formatting via node so
+          # we don't end up rewriting the whole file.
+          node -e "
+            const fs = require('fs');
+            const path = './editors/vscode/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+          # editors/zed/extension.toml — single-line replacement of the
+          # top-level `version = "..."` field.
+          sed -i 's/^version = .*/version = "'"$VERSION"'"/' editors/zed/extension.toml
+
+          if git diff --quiet; then
+            echo "Editor manifests already at $VERSION"
+            exit 0
+          fi
+
+          git add editors/vscode/package.json editors/zed/extension.toml
+          git commit -m "chore: sync editor manifests to $VERSION"
+          git push origin "$BRANCH"
 
   # Runs on every push to main; release-plz internally detects when a
   # release PR has just been merged and only then publishes to crates.io,

@@ -18,16 +18,16 @@ Authoring a release is a PR-based flow driven by **release-plz**:
    (`feat:` for minor bumps, `fix:` for patches, `feat!:` or
    `BREAKING CHANGE:` for majors).
 2. The `Release-plz` workflow opens (or updates) a **"chore: release"**
-   PR that bumps `Cargo.toml` and prepends to `CHANGELOG.md`.
-3. **Bump the editor versions in that PR** before merging — edit
-   `editors/vscode/package.json` and `editors/zed/extension.toml` so
-   their `version` fields match the crate. (See "Lockstep" below for
-   why this is manual.)
-4. Merge the PR. release-plz publishes `primate` to crates.io,
+   PR that bumps `Cargo.toml` and prepends to `CHANGELOG.md`. A
+   follow-up commit on the same branch syncs
+   `editors/vscode/package.json` and `editors/zed/extension.toml` to
+   the new version, so all three artifacts stay in lockstep without
+   any manual intervention.
+3. Merge the PR. release-plz publishes `primate` to crates.io,
    creates a GitHub Release, and pushes a `vX.Y.Z` tag.
-5. The `Publish extensions` workflow fires on the tag and publishes
-   the VS Code extension to the Marketplace + Open VSX, and opens a PR
-   to `zed-industries/extensions` for the Zed extension.
+4. The `Publish extensions` workflow fires on the tag and publishes
+   the VS Code extension to the Marketplace + Open VSX, and opens a
+   PR to `zed-industries/extensions` for the Zed extension.
 
 ## Required secrets
 
@@ -43,22 +43,18 @@ the GitHub repo:
 
 ## Lockstep
 
-release-plz bumps the Rust crate version automatically but doesn't
-touch the editor extension manifests. Until that's automated, the
-editor versions are bumped by hand in the release PR. The
-`Publish extensions` workflow refuses to publish if
-`editors/vscode/package.json`'s version doesn't match the tag, so a
-mismatch surfaces immediately rather than silently shipping a stale
-version.
+release-plz bumps the Rust crate version; a follow-up step in the
+same workflow syncs the editor manifests
+(`editors/vscode/package.json` and `editors/zed/extension.toml`) to
+match. The `Publish extensions` workflow still verifies the match at
+publish time as a safety net — if the manifest version doesn't equal
+the tag, the publish fails before reaching the marketplace.
 
-If editor extensions diverge from the crate's release cadence (i.e.
-they don't need to ship every release), you can:
-
-- Skip the editor bump in a release PR — the publish workflow will
-  fail-fast on the version check, which is the signal to either bump
-  or remove the editor publish step from that release.
-- Or split editor publishes into a separate workflow with its own tag
-  prefix (e.g. `vscode-vX.Y.Z`).
+If the editor extensions ever need to ship on a different cadence
+than the crate, the simplest path is to skip the auto-sync (delete
+the "Sync editor manifest versions" step in `release-plz.yml`) and
+bump the manifests by hand only when an editor change actually needs
+to ship.
 
 ## First-time setup
 
