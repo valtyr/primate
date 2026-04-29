@@ -5,9 +5,9 @@
 //! Within groups of consecutive declarations (no blank line between), the
 //! type, name, and `=` columns are aligned.
 
+use crate::diagnostics::Diagnostics;
 use crate::parser::ast::*;
 use crate::parser::{lexer, parse_source};
-use crate::diagnostics::Diagnostics;
 
 const INDENT: &str = "    ";
 
@@ -96,18 +96,16 @@ fn group_items<'a>(items: &'a [Item]) -> Vec<Group<'a>> {
     let mut current_decls: Vec<&'a Decl> = Vec::new();
     let mut current_uses: Vec<&'a UseDecl> = Vec::new();
 
-    let flush_decls =
-        |current: &mut Vec<&'a Decl>, groups: &mut Vec<Group<'a>>| {
-            if !current.is_empty() {
-                groups.push(Group::Decls(std::mem::take(current)));
-            }
-        };
-    let flush_uses =
-        |current: &mut Vec<&'a UseDecl>, groups: &mut Vec<Group<'a>>| {
-            if !current.is_empty() {
-                groups.push(Group::Uses(std::mem::take(current)));
-            }
-        };
+    let flush_decls = |current: &mut Vec<&'a Decl>, groups: &mut Vec<Group<'a>>| {
+        if !current.is_empty() {
+            groups.push(Group::Decls(std::mem::take(current)));
+        }
+    };
+    let flush_uses = |current: &mut Vec<&'a UseDecl>, groups: &mut Vec<Group<'a>>| {
+        if !current.is_empty() {
+            groups.push(Group::Uses(std::mem::take(current)));
+        }
+    };
 
     for item in items {
         match item {
@@ -144,8 +142,7 @@ fn group_items<'a>(items: &'a [Item]) -> Vec<Group<'a>> {
 fn format_use_group(uses: &[&UseDecl], out: &mut String) {
     // RFC 0003 §5: simplify single-brace, merge same-path imports, and sort.
     use std::collections::BTreeMap;
-    let mut by_path: BTreeMap<String, std::collections::BTreeSet<String>> =
-        BTreeMap::new();
+    let mut by_path: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
     for u in uses {
         let path = u.path.join("::");
         let entry = by_path.entry(path).or_default();
@@ -186,7 +183,10 @@ fn format_decl_group(decls: &[&Decl], out: &mut String) {
 
     if all_const && !const_decls.is_empty() {
         // Compute alignment widths.
-        let type_strs: Vec<String> = const_decls.iter().map(|c| format_type(&c.type_expr)).collect();
+        let type_strs: Vec<String> = const_decls
+            .iter()
+            .map(|c| format_type(&c.type_expr))
+            .collect();
         let name_strs: Vec<String> = const_decls.iter().map(|c| c.name.clone()).collect();
         let max_type = type_strs.iter().map(|s| s.len()).max().unwrap_or(0);
         let max_name = name_strs.iter().map(|s| s.len()).max().unwrap_or(0);
@@ -282,12 +282,7 @@ fn format_enum(e: &EnumDecl, out: &mut String, indent: &str) {
 
     // Compute alignment for variant names if any have explicit values.
     let any_explicit = e.variants.iter().any(|v| v.value.is_some());
-    let max_name = e
-        .variants
-        .iter()
-        .map(|v| v.name.len())
-        .max()
-        .unwrap_or(0);
+    let max_name = e.variants.iter().map(|v| v.name.len()).max().unwrap_or(0);
 
     let inner_indent = format!("{}{}", indent, INDENT);
     for v in &e.variants {
@@ -351,9 +346,16 @@ fn format_value_wrapped(v: &ValueExpr, prefix_col: usize, outer_indent: usize) -
     // trailing comma in source stays multi-line regardless of column budget.
     let force_multiline = matches!(
         &v.kind,
-        ValueExprKind::Array { trailing_comma: true, .. }
-            | ValueExprKind::Tuple { trailing_comma: true, .. }
-            | ValueExprKind::Map { trailing_comma: true, .. },
+        ValueExprKind::Array {
+            trailing_comma: true,
+            ..
+        } | ValueExprKind::Tuple {
+            trailing_comma: true,
+            ..
+        } | ValueExprKind::Map {
+            trailing_comma: true,
+            ..
+        },
     );
     if !force_multiline {
         let single = format_value(v, false, outer_indent);
@@ -438,20 +440,32 @@ fn format_value(v: &ValueExpr, _trailing_comma: bool, indent_level: usize) -> St
         ValueExprKind::Path { path } => path.join("::"),
         ValueExprKind::Neg(inner) => format!("-{}", format_value(inner, false, indent_level)),
         ValueExprKind::Array { items, .. } => {
-            let parts: Vec<String> = items.iter().map(|i| format_value(i, false, indent_level)).collect();
+            let parts: Vec<String> = items
+                .iter()
+                .map(|i| format_value(i, false, indent_level))
+                .collect();
             format!("[{}]", parts.join(", "))
         }
         ValueExprKind::Tuple { items, .. } => {
             // RFC 0003 §1: tuple values are written `[...]`. The Tuple variant
             // is no longer produced by the parser, but we keep this arm for
             // compatibility if a caller hand-builds the AST.
-            let parts: Vec<String> = items.iter().map(|i| format_value(i, false, indent_level)).collect();
+            let parts: Vec<String> = items
+                .iter()
+                .map(|i| format_value(i, false, indent_level))
+                .collect();
             format!("[{}]", parts.join(", "))
         }
         ValueExprKind::Map { entries, .. } => {
             let parts: Vec<String> = entries
                 .iter()
-                .map(|(k, v)| format!("{}: {}", format_map_key(k), format_value(v, false, indent_level)))
+                .map(|(k, v)| {
+                    format!(
+                        "{}: {}",
+                        format_map_key(k),
+                        format_value(v, false, indent_level)
+                    )
+                })
                 .collect();
             format!("{{{}}}", parts.join(", "))
         }
@@ -552,9 +566,17 @@ mod tests {
         let n_lines = out.matches('\n').count();
         assert!(n_lines >= 13, "expected wrapped output, got: {}", out);
         // Closing bracket on its own line.
-        assert!(out.contains("\n]\n"), "expected closing bracket on own line, got: {}", out);
+        assert!(
+            out.contains("\n]\n"),
+            "expected closing bracket on own line, got: {}",
+            out
+        );
         // Trailing comma after last item.
-        assert!(out.contains("1000000,\n]\n"), "expected trailing comma, got: {}", out);
+        assert!(
+            out.contains("1000000,\n]\n"),
+            "expected trailing comma, got: {}",
+            out
+        );
     }
 
     #[test]
@@ -598,8 +620,16 @@ mod tests {
         // reads better as a multi-line block.
         let input = "type Mat = array<array<f64, 3>, 3>\nMat I = [\n    [1, 0, 0],\n    [0, 1, 0],\n    [0, 0, 1],\n]\n";
         let out = fmt(input);
-        assert!(out.contains("[\n    [1, 0, 0],"), "expected multi-line outer, got: {}", out);
-        assert!(out.contains("[0, 0, 1],\n]"), "expected trailing comma on last row, got: {}", out);
+        assert!(
+            out.contains("[\n    [1, 0, 0],"),
+            "expected multi-line outer, got: {}",
+            out
+        );
+        assert!(
+            out.contains("[0, 0, 1],\n]"),
+            "expected trailing comma on last row, got: {}",
+            out
+        );
     }
 
     #[test]

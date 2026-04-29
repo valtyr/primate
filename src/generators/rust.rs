@@ -4,12 +4,14 @@
 //! per source-file namespace. Cross-namespace references (e.g. a constant
 //! in `limits` typed as `network::Port`) are emitted as `super::network::Port`.
 
-use crate::ir::{CodeGenRequest, CodeGenResponse, EnumDef, GeneratedFile, Module, SymbolMapping, TypeAliasDef};
-use crate::types::{
-    escape_keyword, resolve_alias, to_pascal_case, to_screaming_snake_case, Type, Value,
-    RUST_KEYWORDS,
-};
 use super::Generator;
+use crate::ir::{
+    CodeGenRequest, CodeGenResponse, EnumDef, GeneratedFile, Module, SymbolMapping, TypeAliasDef,
+};
+use crate::types::{
+    RUST_KEYWORDS, Type, Value, escape_keyword, resolve_alias, to_pascal_case,
+    to_screaming_snake_case,
+};
 use std::collections::HashMap;
 
 const INDENT: &str = "    ";
@@ -125,18 +127,23 @@ impl RustGenerator {
             Type::Bool => "bool".to_string(),
             Type::String | Type::Regex | Type::Url => "&'static str".to_string(),
             Type::Duration => "std::time::Duration".to_string(),
-            Type::Array { element } => format!("&'static [{}]", self.generate_type(element, current_ns)),
+            Type::Array { element } => {
+                format!("&'static [{}]", self.generate_type(element, current_ns))
+            }
             Type::FixedArray { element, length } => {
                 format!("[{}; {}]", self.generate_type(element, current_ns), length)
             }
-            Type::Map { .. } => {
-                "&'static [(&'static str, &'static str)]".to_string()
-            }
+            Type::Map { .. } => "&'static [(&'static str, &'static str)]".to_string(),
             Type::Tuple { elements } => {
-                let types: Vec<_> = elements.iter().map(|e| self.generate_type(e, current_ns)).collect();
+                let types: Vec<_> = elements
+                    .iter()
+                    .map(|e| self.generate_type(e, current_ns))
+                    .collect();
                 format!("({})", types.join(", "))
             }
-            Type::Optional { inner } => format!("Option<{}>", self.generate_type(inner, current_ns)),
+            Type::Optional { inner } => {
+                format!("Option<{}>", self.generate_type(inner, current_ns))
+            }
             Type::Enum { name, namespace } => self.qualify(name, namespace, current_ns),
             Type::Alias { name, namespace } => self.qualify(name, namespace, current_ns),
             Type::Struct { fields } => {
@@ -156,7 +163,11 @@ impl RustGenerator {
             Value::Integer(i) => i.to_string(),
             Value::Float(f) => {
                 let s = f.to_string();
-                if s.contains('.') { s } else { format!("{}.0", s) }
+                if s.contains('.') {
+                    s
+                } else {
+                    format!("{}.0", s)
+                }
             }
             Value::Bool(b) => b.to_string(),
             Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
@@ -169,8 +180,15 @@ impl RustGenerator {
                     Type::FixedArray { element, .. } => element.as_ref(),
                     _ => &Type::String,
                 };
-                let items: Vec<_> = arr.iter().map(|v| self.generate_value(v, inner_type, current_ns)).collect();
-                let prefix = if matches!(typ, Type::FixedArray { .. }) { "" } else { "&" };
+                let items: Vec<_> = arr
+                    .iter()
+                    .map(|v| self.generate_value(v, inner_type, current_ns))
+                    .collect();
+                let prefix = if matches!(typ, Type::FixedArray { .. }) {
+                    ""
+                } else {
+                    "&"
+                };
                 format!("{}[{}]", prefix, items.join(", "))
             }
             Value::Map(_) => "&[]".to_string(),
@@ -222,7 +240,13 @@ impl RustGenerator {
         }
     }
 
-    fn emit_alias(&self, tracker: &mut LineTracker, alias: &TypeAliasDef, indent: &str, current_ns: &str) {
+    fn emit_alias(
+        &self,
+        tracker: &mut LineTracker,
+        alias: &TypeAliasDef,
+        indent: &str,
+        current_ns: &str,
+    ) {
         if let Some(ref doc) = alias.doc {
             for line in doc.lines() {
                 tracker.push_str(&format!("{}/// {}\n", indent, line));
@@ -232,16 +256,31 @@ impl RustGenerator {
         let target = self.generate_type(&alias.target, current_ns);
         let column = (indent.len() as u32) + (self.visibility.as_str().len() as u32) + 6;
         tracker.add_mapping(format!("{}.{}", alias.namespace, alias.name), column);
-        tracker.push_str(&format!("{}{}type {} = {};\n\n", indent, self.visibility.as_str(), name, target));
+        tracker.push_str(&format!(
+            "{}{}type {} = {};\n\n",
+            indent,
+            self.visibility.as_str(),
+            name,
+            target
+        ));
     }
 
-    fn emit_enum(&self, tracker: &mut LineTracker, enum_def: &EnumDef, indent: &str, _current_ns: &str) {
+    fn emit_enum(
+        &self,
+        tracker: &mut LineTracker,
+        enum_def: &EnumDef,
+        indent: &str,
+        _current_ns: &str,
+    ) {
         if let Some(ref doc) = enum_def.doc {
             for line in doc.lines() {
                 tracker.push_str(&format!("{}/// {}\n", indent, line));
             }
         }
-        tracker.push_str(&format!("{}#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n", indent));
+        tracker.push_str(&format!(
+            "{}#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n",
+            indent
+        ));
         if enum_def.backing_type == "integer" {
             tracker.push_str(&format!("{}#[repr(i32)]\n", indent));
         }
@@ -249,7 +288,12 @@ impl RustGenerator {
         let name = to_pascal_case(&enum_def.name);
         let column = (indent.len() as u32) + (self.visibility.as_str().len() as u32) + 6;
         tracker.add_mapping(format!("{}.{}", enum_def.namespace, enum_def.name), column);
-        tracker.push_str(&format!("{}{}enum {} {{\n", indent, self.visibility.as_str(), name));
+        tracker.push_str(&format!(
+            "{}{}enum {} {{\n",
+            indent,
+            self.visibility.as_str(),
+            name
+        ));
 
         for variant in &enum_def.variants {
             let variant_name = to_pascal_case(&variant.name);
@@ -266,15 +310,19 @@ impl RustGenerator {
 
         if enum_def.backing_type == "string" {
             tracker.push_str(&format!("{}impl {} {{\n", indent, name));
-            tracker.push_str(&format!("{}{}{}fn as_str(&self) -> &'static str {{\n", indent, INDENT, self.visibility.as_str()));
+            tracker.push_str(&format!(
+                "{}{}{}fn as_str(&self) -> &'static str {{\n",
+                indent,
+                INDENT,
+                self.visibility.as_str()
+            ));
             tracker.push_str(&format!("{}{}{}match self {{\n", indent, INDENT, INDENT));
             for variant in &enum_def.variants {
                 let variant_name = to_pascal_case(&variant.name);
                 if let Value::String(s) = &variant.value {
                     tracker.push_str(&format!(
                         "{}{}{}{}{}::{} => \"{}\",\n",
-                        indent, INDENT, INDENT, INDENT,
-                        name, variant_name, s,
+                        indent, INDENT, INDENT, INDENT, name, variant_name, s,
                     ));
                 }
             }
@@ -284,7 +332,14 @@ impl RustGenerator {
         }
     }
 
-    fn emit_constant(&self, tracker: &mut LineTracker, module: &Module, constant: &crate::ir::Constant, alias_map: &HashMap<String, Type>, indent: &str) {
+    fn emit_constant(
+        &self,
+        tracker: &mut LineTracker,
+        module: &Module,
+        constant: &crate::ir::Constant,
+        alias_map: &HashMap<String, Type>,
+        indent: &str,
+    ) {
         let current_ns = module.namespace.as_str();
         if let Some(ref doc) = constant.doc {
             for line in doc.lines() {
@@ -298,8 +353,16 @@ impl RustGenerator {
         let (typ, value) = if let Type::Struct { fields } = &constant.typ {
             let struct_name = to_pascal_case(&constant.name);
 
-            tracker.push_str(&format!("{}#[derive(Debug, Clone, Copy, PartialEq)]\n", indent));
-            tracker.push_str(&format!("{}{}struct {} {{\n", indent, self.visibility.as_str(), struct_name));
+            tracker.push_str(&format!(
+                "{}#[derive(Debug, Clone, Copy, PartialEq)]\n",
+                indent
+            ));
+            tracker.push_str(&format!(
+                "{}{}struct {} {{\n",
+                indent,
+                self.visibility.as_str(),
+                struct_name
+            ));
 
             let mut field_list: Vec<_> = fields.iter().collect();
             field_list.sort_by_key(|(k, _)| k.as_str());
@@ -307,7 +370,10 @@ impl RustGenerator {
             for (field_name, field_type) in &field_list {
                 tracker.push_str(&format!(
                     "{}{}{}{}: {},\n",
-                    indent, INDENT, self.visibility.as_str(), field_name,
+                    indent,
+                    INDENT,
+                    self.visibility.as_str(),
+                    field_name,
                     self.generate_type(field_type, current_ns)
                 ));
             }
@@ -339,7 +405,11 @@ impl RustGenerator {
         tracker.add_mapping(format!("{}.{}", module.namespace, constant.name), column);
         tracker.push_str(&format!(
             "{}{}const {}: {} = {};\n\n",
-            indent, self.visibility.as_str(), name, typ, value,
+            indent,
+            self.visibility.as_str(),
+            name,
+            typ,
+            value,
         ));
     }
 }
@@ -388,8 +458,16 @@ impl Generator for RustGenerator {
 
         for ns in &all_namespaces {
             let module = request.modules.iter().find(|m| &m.namespace == ns);
-            let enums: Vec<&EnumDef> = request.enums.iter().filter(|e| &e.namespace == ns).collect();
-            let aliases: Vec<&TypeAliasDef> = request.aliases.iter().filter(|a| &a.namespace == ns).collect();
+            let enums: Vec<&EnumDef> = request
+                .enums
+                .iter()
+                .filter(|e| &e.namespace == ns)
+                .collect();
+            let aliases: Vec<&TypeAliasDef> = request
+                .aliases
+                .iter()
+                .filter(|a| &a.namespace == ns)
+                .collect();
 
             if let Some(module) = module {
                 tracker.push_str(&format!("// source: {}\n", module.source_file));

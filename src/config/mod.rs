@@ -218,9 +218,7 @@ pub enum ConfigError {
     #[error("at least one [[output]] is required")]
     NoOutputs,
 
-    #[error(
-        "output[{0}]: exactly one of 'generator' or 'plugin' must be specified, but both were"
-    )]
+    #[error("output[{0}]: exactly one of 'generator' or 'plugin' must be specified, but both were")]
     BothGeneratorAndPlugin(usize),
 
     #[error(

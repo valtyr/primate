@@ -83,7 +83,10 @@ pub fn invoke_plugin(
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(PluginError::Crashed(code, stderr.to_string()))
         }
-        None => Err(PluginError::Crashed(-1, "Plugin terminated by signal".to_string())),
+        None => Err(PluginError::Crashed(
+            -1,
+            "Plugin terminated by signal".to_string(),
+        )),
     }
 }
 

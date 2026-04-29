@@ -141,10 +141,7 @@ pub enum TypeExprKind {
     /// `array<T>` (de-sugars to Array; kept distinct for round-tripping if desired)
     ArrayGeneric(Box<TypeExpr>),
     /// `array<T, N>` — fixed-size homogeneous array (RFC 0003 §2).
-    FixedArrayGeneric {
-        element: Box<TypeExpr>,
-        length: u32,
-    },
+    FixedArrayGeneric { element: Box<TypeExpr>, length: u32 },
     /// `optional<T>`
     OptionalGeneric(Box<TypeExpr>),
     /// `map<K, V>`
@@ -164,15 +161,23 @@ pub struct ValueExpr {
 
 #[derive(Debug, Clone)]
 pub enum ValueExprKind {
-    Int { value: i128, suffix: Option<String> },
-    Float { value: f64, suffix: Option<String> },
+    Int {
+        value: i128,
+        suffix: Option<String>,
+    },
+    Float {
+        value: f64,
+        suffix: Option<String>,
+    },
     Bool(bool),
     Str(String),
     /// `none` literal — the optional-empty case.
     None_,
     /// A bare or qualified identifier path used as a value (enum variant).
     /// e.g. `Info`, `core::types::LogLevel::Info`.
-    Path { path: Vec<String> },
+    Path {
+        path: Vec<String>,
+    },
     /// `[...]` ordered literal. Lower-pass disambiguates against the declared
     /// type to either an array or tuple. `trailing_comma` records whether the
     /// source had a comma after the last element — RFC 0003 §4 magic-trailing-

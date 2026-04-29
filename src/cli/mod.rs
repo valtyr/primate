@@ -4,12 +4,12 @@
 
 use crate::config::Config;
 use crate::diagnostics::{Diagnostics, Severity};
+use crate::generators::Generator;
 use crate::generators::python::PythonGenerator;
 use crate::generators::rust::RustGenerator;
 use crate::generators::typescript::TypeScriptGenerator;
-use crate::generators::Generator;
 use crate::ir::CodeGenRequest;
-use crate::parser::{discover_files, parse_project, ParsedProject};
+use crate::parser::{ParsedProject, discover_files, parse_project};
 use crate::sourcemap::{Sourcemap, SourcemapEntry};
 use clap::{Parser, Subcommand};
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
@@ -238,7 +238,10 @@ fn run_generate(
             // ("Is a directory", "Not a directory") down the line, so catch
             // it here with a message that points at the config field.
             if let Err(msg) = validate_output_path(generator_name, &output_path) {
-                eprintln!("Config error in [[output]] generator = \"{}\": {}", generator_name, msg);
+                eprintln!(
+                    "Config error in [[output]] generator = \"{}\": {}",
+                    generator_name, msg
+                );
                 std::process::exit(2);
             }
 
@@ -246,17 +249,32 @@ fn run_generate(
                 "typescript" => {
                     let generator = TypeScriptGenerator::from_options(&options);
                     let response = generator.generate(&request);
-                    write_response_files(generator_name, &response.files, &mut sourcemap, &project)?;
+                    write_response_files(
+                        generator_name,
+                        &response.files,
+                        &mut sourcemap,
+                        &project,
+                    )?;
                 }
                 "rust" => {
                     let generator = RustGenerator::from_options(&options);
                     let response = generator.generate(&request);
-                    write_response_files(generator_name, &response.files, &mut sourcemap, &project)?;
+                    write_response_files(
+                        generator_name,
+                        &response.files,
+                        &mut sourcemap,
+                        &project,
+                    )?;
                 }
                 "python" => {
                     let generator = PythonGenerator::from_options(&options);
                     let response = generator.generate(&request);
-                    write_response_files(generator_name, &response.files, &mut sourcemap, &project)?;
+                    write_response_files(
+                        generator_name,
+                        &response.files,
+                        &mut sourcemap,
+                        &project,
+                    )?;
                 }
                 _ => {
                     eprintln!("Unknown generator: {}", generator_name);
@@ -266,7 +284,12 @@ fn run_generate(
             match crate::plugin::resolve_plugin(plugin_name) {
                 Ok(plugin_path) => match crate::plugin::invoke_plugin(&plugin_path, &request) {
                     Ok(response) => {
-                        write_response_files(plugin_name, &response.files, &mut sourcemap, &project)?;
+                        write_response_files(
+                            plugin_name,
+                            &response.files,
+                            &mut sourcemap,
+                            &project,
+                        )?;
                         for error in response.errors {
                             eprintln!("Plugin error: {}", error.message);
                         }
@@ -440,7 +463,11 @@ fn run_fmt(
         if t.is_file() {
             files.push(t.clone());
         } else if t.is_dir() {
-            for entry in walkdir::WalkDir::new(t).follow_links(true).into_iter().filter_map(|e| e.ok()) {
+            for entry in walkdir::WalkDir::new(t)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 let p = entry.path();
                 if p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("const") {
                     files.push(p.to_path_buf());

@@ -38,21 +38,21 @@ pub enum Tok {
     Str(String),
 
     // Punctuation
-    Eq,            // =
-    Colon,         // :
-    ColonColon,    // ::
-    Comma,         // ,
-    LBrace,        // {
-    RBrace,        // }
-    LBracket,      // [
-    RBracket,      // ]
-    LParen,        // (
-    RParen,        // )
-    Lt,            // <
-    Gt,            // >
-    Question,      // ?
-    At,            // @
-    Minus,         // -
+    Eq,         // =
+    Colon,      // :
+    ColonColon, // ::
+    Comma,      // ,
+    LBrace,     // {
+    RBrace,     // }
+    LBracket,   // [
+    RBracket,   // ]
+    LParen,     // (
+    RParen,     // )
+    Lt,         // <
+    Gt,         // >
+    Question,   // ?
+    At,         // @
+    Minus,      // -
 
     // Trivia
     LineComment(String),    // //   (text without leading slashes)
@@ -215,7 +215,11 @@ impl<'a> Lexer<'a> {
                     break;
                 }
             }
-            let tok = if saw_blank { Tok::BlankLine } else { Tok::Newline };
+            let tok = if saw_blank {
+                Tok::BlankLine
+            } else {
+                Tok::Newline
+            };
             return Ok(Token {
                 tok,
                 span: self.make_span(start, start_line, start_col),
@@ -509,7 +513,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_number(&mut self, start: usize, start_line: u32, start_col: u32) -> Result<Token, LexError> {
+    fn lex_number(
+        &mut self,
+        start: usize,
+        start_line: u32,
+        start_col: u32,
+    ) -> Result<Token, LexError> {
         // Hex / binary / octal: must start with 0x/0b/0o, no suffix allowed
         if self.peek() == Some(b'0') {
             match self.peek_at(1) {
@@ -745,7 +754,13 @@ mod tests {
     #[test]
     fn hex_no_suffix() {
         let toks = lex_ok("0xFF\n");
-        assert!(matches!(toks[0], Tok::Int { value: 255, suffix: None }));
+        assert!(matches!(
+            toks[0],
+            Tok::Int {
+                value: 255,
+                suffix: None
+            }
+        ));
     }
 
     #[test]

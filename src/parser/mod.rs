@@ -174,11 +174,7 @@ mod tests {
 
     #[test]
     fn simple_const() {
-        let p = parse_one(
-            "test.prim",
-            "test",
-            "u32 MAX_USERS = 8\n",
-        );
+        let p = parse_one("test.prim", "test", "u32 MAX_USERS = 8\n");
         assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
         assert_eq!(p.modules.len(), 1);
         assert_eq!(p.modules[0].constants.len(), 1);
@@ -187,11 +183,7 @@ mod tests {
 
     #[test]
     fn duration_with_suffix() {
-        let p = parse_one(
-            "t.prim",
-            "t",
-            "duration TIMEOUT = 30s\n",
-        );
+        let p = parse_one("t.prim", "t", "duration TIMEOUT = 30s\n");
         assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
     }
 
@@ -219,24 +211,19 @@ mod tests {
 
     #[test]
     fn type_alias() {
-        let p = parse_one(
-            "t.prim",
-            "t",
-            "type Port = u32\nPort HTTP_PORT = 8080\n",
-        );
+        let p = parse_one("t.prim", "t", "type Port = u32\nPort HTTP_PORT = 8080\n");
         assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
         assert_eq!(p.aliases.len(), 1);
     }
 
     #[test]
     fn doc_attaches_to_decl() {
-        let p = parse_one(
-            "t.prim",
-            "t",
-            "/// Maximum users.\nu32 MAX_USERS = 8\n",
-        );
+        let p = parse_one("t.prim", "t", "/// Maximum users.\nu32 MAX_USERS = 8\n");
         assert!(!p.diagnostics.has_errors());
-        assert_eq!(p.modules[0].constants[0].doc.as_deref(), Some("Maximum users."));
+        assert_eq!(
+            p.modules[0].constants[0].doc.as_deref(),
+            Some("Maximum users.")
+        );
     }
 
     #[test]
@@ -295,11 +282,7 @@ mod tests {
 
     #[test]
     fn percent_suffix_on_float() {
-        let p = parse_one(
-            "t.prim",
-            "t",
-            "f64 ROLLOUT = 5%\nf64 OPACITY = 12.5%\n",
-        );
+        let p = parse_one("t.prim", "t", "f64 ROLLOUT = 5%\nf64 OPACITY = 12.5%\n");
         assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
         match &p.modules[0].constants[0].value {
             crate::types::Value::Float(v) => assert!((v - 0.05).abs() < 1e-9, "got {}", v),
@@ -370,11 +353,7 @@ mod tests {
 
     #[test]
     fn multiline_map_type_is_accepted() {
-        let p = parse_one(
-            "t.prim",
-            "t",
-            "type Cfg = map<\n    string,\n    u32,\n>\n",
-        );
+        let p = parse_one("t.prim", "t", "type Cfg = map<\n    string,\n    u32,\n>\n");
         assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
     }
 

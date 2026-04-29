@@ -9,11 +9,9 @@
 use super::ast::*;
 use super::lexer::Span;
 use crate::diagnostics::{Diagnostic, Diagnostics};
-use crate::ir::{
-    Constant, EnumDef, EnumVariant, Module, SourceLocation, TypeAliasDef,
-};
+use crate::ir::{Constant, EnumDef, EnumVariant, Module, SourceLocation, TypeAliasDef};
 use crate::types::{
-    is_screaming_snake_case, parse_duration, validate_regex, validate_url, Type, Value,
+    Type, Value, is_screaming_snake_case, parse_duration, validate_regex, validate_url,
 };
 use std::collections::HashMap;
 
@@ -69,7 +67,8 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
     }
 
     // Pass 1: build indices of enums and aliases. Detect duplicates.
-    let mut enum_index: HashMap<(String, String), (EnumIndexEntry, SourceLocation)> = HashMap::new();
+    let mut enum_index: HashMap<(String, String), (EnumIndexEntry, SourceLocation)> =
+        HashMap::new();
     let mut alias_index: HashMap<(String, String), (AliasIndexEntry, SourceLocation)> =
         HashMap::new();
     let mut const_names: HashMap<(String, String), SourceLocation> = HashMap::new();
@@ -123,29 +122,32 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
                     // and (b) the bare-name range for bounds-checking variant values
                     // (RFC 0004 §3) — `enum Foo: u8` checks each variant against
                     // 0..=255, not against u32's range.
-                    let (int_backed, backing_range, backing_name): (bool, Option<(i128, i128)>, Option<String>) =
-                        match &e.backing {
-                            Some(t) => {
-                                let bare_name = match &t.kind {
-                                    TypeExprKind::Named { path: segs } if segs.len() == 1 => {
-                                        Some(segs[0].clone())
-                                    }
-                                    _ => None,
-                                };
-                                let range = bare_name.as_deref().and_then(int_range_from_name);
-                                if range.is_none() {
-                                    diagnostics.add(Diagnostic::error(
+                    let (int_backed, backing_range, backing_name): (
+                        bool,
+                        Option<(i128, i128)>,
+                        Option<String>,
+                    ) = match &e.backing {
+                        Some(t) => {
+                            let bare_name = match &t.kind {
+                                TypeExprKind::Named { path: segs } if segs.len() == 1 => {
+                                    Some(segs[0].clone())
+                                }
+                                _ => None,
+                            };
+                            let range = bare_name.as_deref().and_then(int_range_from_name);
+                            if range.is_none() {
+                                diagnostics.add(Diagnostic::error(
                                         &source_loc(&file.path, t.span),
                                         "invalid-enum-backing",
                                         "enum backing type must be an integer (i8/i16/i32/i64/u8/u16/u32/u64)".to_string(),
                                     ));
-                                    (false, None, None)
-                                } else {
-                                    (true, range, bare_name)
-                                }
+                                (false, None, None)
+                            } else {
+                                (true, range, bare_name)
                             }
-                            None => (false, None, None),
-                        };
+                        }
+                        None => (false, None, None),
+                    };
 
                     let mut variants = Vec::new();
                     let mut variant_names: Vec<String> = Vec::new();
@@ -358,9 +360,7 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
                     continue;
                 }
                 let local_key = (namespace.clone(), it.name.clone());
-                if enum_index.contains_key(&local_key)
-                    || alias_index.contains_key(&local_key)
-                {
+                if enum_index.contains_key(&local_key) || alias_index.contains_key(&local_key) {
                     diagnostics.add(Diagnostic::error(
                         &source_loc(&file.path, it.span),
                         "import-collision",
@@ -413,7 +413,9 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
 
     // Patch alias_decls and alias_index with resolved targets.
     for alias_def in alias_decls.iter_mut() {
-        if let Some(target) = alias_targets.get(&(alias_def.namespace.clone(), alias_def.name.clone())) {
+        if let Some(target) =
+            alias_targets.get(&(alias_def.namespace.clone(), alias_def.name.clone()))
+        {
             alias_def.target = target.clone();
         }
     }
@@ -433,10 +435,7 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
                 _ => continue,
             };
             if let DeclKind::TypeAlias(a) = &decl.kind {
-                let inline = decl
-                    .attributes
-                    .iter()
-                    .any(|attr| attr.name == "inline");
+                let inline = decl.attributes.iter().any(|attr| attr.name == "inline");
                 inline_aliases.insert((namespace.clone(), a.name.clone()), inline);
                 if let Some(t) = alias_targets.get(&(namespace.clone(), a.name.clone())) {
                     alias_only_targets.insert((namespace.clone(), a.name.clone()), t.clone());
@@ -446,7 +445,11 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
     }
 
     // Drop @inline aliases from emission.
-    alias_decls.retain(|a| !*inline_aliases.get(&(a.namespace.clone(), a.name.clone())).unwrap_or(&false));
+    alias_decls.retain(|a| {
+        !*inline_aliases
+            .get(&(a.namespace.clone(), a.name.clone()))
+            .unwrap_or(&false)
+    });
 
     // Pass 3: lower constants per file.
     let mut modules: Vec<Module> = Vec::new();
@@ -493,7 +496,8 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
                 };
 
                 // Expand inline aliases on use.
-                let typ = expand_inline_aliases(&resolved_type, &inline_aliases, &alias_only_targets);
+                let typ =
+                    expand_inline_aliases(&resolved_type, &inline_aliases, &alias_only_targets);
 
                 // For value normalization, fully resolve aliases to their underlying types.
                 let normalize_typ = fully_resolve_aliases(&typ, &alias_only_targets);
@@ -560,10 +564,7 @@ fn effective_namespace(file: &ParsedFile, diagnostics: &mut Diagnostics) -> Stri
                             diagnostics.add(Diagnostic::error(
                                 &source_loc(&file.path, ns.path_span),
                                 "naming-convention",
-                                format!(
-                                    "namespace segment `{}` must be lower_snake_case",
-                                    seg
-                                ),
+                                format!("namespace segment `{}` must be lower_snake_case", seg),
                             ));
                         }
                     }
@@ -611,9 +612,15 @@ fn is_lower_snake(s: &str) -> bool {
 
 fn constant_int(kind: &ValueExprKind) -> Option<i128> {
     match kind {
-        ValueExprKind::Int { value, suffix: None } => Some(*value),
+        ValueExprKind::Int {
+            value,
+            suffix: None,
+        } => Some(*value),
         ValueExprKind::Neg(inner) => match &inner.kind {
-            ValueExprKind::Int { value, suffix: None } => Some(-*value),
+            ValueExprKind::Int {
+                value,
+                suffix: None,
+            } => Some(-*value),
             _ => None,
         },
         _ => None,
@@ -745,20 +752,45 @@ fn resolve_type_expr(
             }
         }
         TypeExprKind::Array(inner) | TypeExprKind::ArrayGeneric(inner) => {
-            let inner_t = resolve_type_expr(inner, current_namespace, imports, enums, aliases, path, diags)?;
+            let inner_t = resolve_type_expr(
+                inner,
+                current_namespace,
+                imports,
+                enums,
+                aliases,
+                path,
+                diags,
+            )?;
             Some(Type::Array {
                 element: Box::new(inner_t),
             })
         }
         TypeExprKind::Optional(inner) | TypeExprKind::OptionalGeneric(inner) => {
-            let inner_t = resolve_type_expr(inner, current_namespace, imports, enums, aliases, path, diags)?;
+            let inner_t = resolve_type_expr(
+                inner,
+                current_namespace,
+                imports,
+                enums,
+                aliases,
+                path,
+                diags,
+            )?;
             Some(Type::Optional {
                 inner: Box::new(inner_t),
             })
         }
         TypeExprKind::Map { key, value } => {
-            let k = resolve_type_expr(key, current_namespace, imports, enums, aliases, path, diags)?;
-            let v = resolve_type_expr(value, current_namespace, imports, enums, aliases, path, diags)?;
+            let k =
+                resolve_type_expr(key, current_namespace, imports, enums, aliases, path, diags)?;
+            let v = resolve_type_expr(
+                value,
+                current_namespace,
+                imports,
+                enums,
+                aliases,
+                path,
+                diags,
+            )?;
             Some(Type::Map {
                 key: Box::new(k),
                 value: Box::new(v),
@@ -767,7 +799,15 @@ fn resolve_type_expr(
         TypeExprKind::Tuple(elems) => {
             let mut ts = Vec::new();
             for e in elems {
-                ts.push(resolve_type_expr(e, current_namespace, imports, enums, aliases, path, diags)?);
+                ts.push(resolve_type_expr(
+                    e,
+                    current_namespace,
+                    imports,
+                    enums,
+                    aliases,
+                    path,
+                    diags,
+                )?);
             }
             Some(Type::Tuple { elements: ts })
         }
@@ -792,13 +832,12 @@ fn resolve_type_expr(
 /// Fully resolve all `Type::Alias` occurrences in `typ` to their underlying
 /// targets. Used when normalizing values, where the value carries the
 /// representation of the underlying type.
-fn fully_resolve_aliases(
-    typ: &Type,
-    targets: &HashMap<(String, String), Type>,
-) -> Type {
+fn fully_resolve_aliases(typ: &Type, targets: &HashMap<(String, String), Type>) -> Type {
     match typ {
         Type::Alias { name, .. } => {
-            let candidate = targets.iter().find_map(|((_, n), v)| if n == name { Some(v) } else { None });
+            let candidate = targets
+                .iter()
+                .find_map(|((_, n), v)| if n == name { Some(v) } else { None });
             match candidate {
                 Some(t) => fully_resolve_aliases(t, targets),
                 None => typ.clone(),
@@ -819,7 +858,10 @@ fn fully_resolve_aliases(
             value: Box::new(fully_resolve_aliases(value, targets)),
         },
         Type::Tuple { elements } => Type::Tuple {
-            elements: elements.iter().map(|e| fully_resolve_aliases(e, targets)).collect(),
+            elements: elements
+                .iter()
+                .map(|e| fully_resolve_aliases(e, targets))
+                .collect(),
         },
         other => other.clone(),
     }
@@ -836,7 +878,10 @@ fn expand_inline_aliases(
             // — when ambiguous, fall back to leaving the alias as-is.
             for ((_ns, n), is_inline) in inline {
                 if n == name && *is_inline {
-                    if let Some(t) = targets.iter().find_map(|((_, k), v)| if k == name { Some(v) } else { None }) {
+                    if let Some(t) = targets
+                        .iter()
+                        .find_map(|((_, k), v)| if k == name { Some(v) } else { None })
+                    {
                         return expand_inline_aliases(t, inline, targets);
                     }
                 }
@@ -950,18 +995,30 @@ fn normalize_value(
             Some(Value::Integer(n))
         }
         Type::F32 | Type::F64 => match &expr.kind {
-            ValueExprKind::Float { value, suffix: None } => Some(Value::Float(*value)),
-            ValueExprKind::Int { value, suffix: None } => Some(Value::Float(*value as f64)),
+            ValueExprKind::Float {
+                value,
+                suffix: None,
+            } => Some(Value::Float(*value)),
+            ValueExprKind::Int {
+                value,
+                suffix: None,
+            } => Some(Value::Float(*value as f64)),
             // Percentage sugar: `50%` → 0.5. Divides by 100, accepting both
             // integer (`50%`) and float (`12.5%`) literals.
-            ValueExprKind::Float { value, suffix: Some(s) } if s == "%" => {
-                Some(Value::Float(*value / 100.0))
+            ValueExprKind::Float {
+                value,
+                suffix: Some(s),
+            } if s == "%" => Some(Value::Float(*value / 100.0)),
+            ValueExprKind::Int {
+                value,
+                suffix: Some(s),
+            } if s == "%" => Some(Value::Float(*value as f64 / 100.0)),
+            ValueExprKind::Float {
+                suffix: Some(s), ..
             }
-            ValueExprKind::Int { value, suffix: Some(s) } if s == "%" => {
-                Some(Value::Float(*value as f64 / 100.0))
-            }
-            ValueExprKind::Float { suffix: Some(s), .. }
-            | ValueExprKind::Int { suffix: Some(s), .. } => {
+            | ValueExprKind::Int {
+                suffix: Some(s), ..
+            } => {
                 diags.add(Diagnostic::error(
                     &source_loc(path, span),
                     "type-mismatch",
@@ -973,14 +1030,22 @@ fn normalize_value(
                 None
             }
             ValueExprKind::Neg(inner) => match &inner.kind {
-                ValueExprKind::Float { value, suffix: None } => Some(Value::Float(-*value)),
-                ValueExprKind::Int { value, suffix: None } => Some(Value::Float(-(*value as f64))),
-                ValueExprKind::Float { value, suffix: Some(s) } if s == "%" => {
-                    Some(Value::Float(-*value / 100.0))
-                }
-                ValueExprKind::Int { value, suffix: Some(s) } if s == "%" => {
-                    Some(Value::Float(-(*value as f64) / 100.0))
-                }
+                ValueExprKind::Float {
+                    value,
+                    suffix: None,
+                } => Some(Value::Float(-*value)),
+                ValueExprKind::Int {
+                    value,
+                    suffix: None,
+                } => Some(Value::Float(-(*value as f64))),
+                ValueExprKind::Float {
+                    value,
+                    suffix: Some(s),
+                } if s == "%" => Some(Value::Float(-*value / 100.0)),
+                ValueExprKind::Int {
+                    value,
+                    suffix: Some(s),
+                } if s == "%" => Some(Value::Float(-(*value as f64) / 100.0)),
                 _ => {
                     diags.add(Diagnostic::error(
                         &source_loc(path, span),

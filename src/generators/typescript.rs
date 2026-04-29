@@ -4,9 +4,13 @@
 //! an `index.ts` that re-exports each namespace. Cross-namespace type
 //! references become real ES `import` statements at the top of each file.
 
-use crate::ir::{CodeGenRequest, CodeGenResponse, EnumDef, GeneratedFile, Module, SymbolMapping, TypeAliasDef};
-use crate::types::{escape_keyword, resolve_alias, to_camel_case, to_pascal_case, Type, Value, TS_KEYWORDS};
 use super::Generator;
+use crate::ir::{
+    CodeGenRequest, CodeGenResponse, EnumDef, GeneratedFile, Module, SymbolMapping, TypeAliasDef,
+};
+use crate::types::{
+    TS_KEYWORDS, Type, Value, escape_keyword, resolve_alias, to_camel_case, to_pascal_case,
+};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 struct LineTracker {
@@ -138,7 +142,12 @@ impl TypeScriptGenerator {
     /// Walk a type and record any cross-namespace enum/alias references for
     /// the importer in `imports` (keyed by source namespace → set of bare
     /// names to import).
-    fn collect_imports(&self, typ: &Type, current_ns: &str, imports: &mut BTreeMap<String, BTreeSet<String>>) {
+    fn collect_imports(
+        &self,
+        typ: &Type,
+        current_ns: &str,
+        imports: &mut BTreeMap<String, BTreeSet<String>>,
+    ) {
         match typ {
             Type::Enum { name, namespace } | Type::Alias { name, namespace } => {
                 if !namespace.is_empty() && namespace != current_ns {
@@ -189,7 +198,11 @@ impl TypeScriptGenerator {
                 format!("[{}]", parts.join(", "))
             }
             Type::Map { key, value } => {
-                format!("Record<{}, {}>", self.generate_type(key), self.generate_type(value))
+                format!(
+                    "Record<{}, {}>",
+                    self.generate_type(key),
+                    self.generate_type(value)
+                )
             }
             Type::Tuple { elements } => {
                 let types: Vec<_> = elements.iter().map(|e| self.generate_type(e)).collect();
@@ -238,7 +251,10 @@ impl TypeScriptGenerator {
                     Type::FixedArray { element, .. } => element.as_ref(),
                     _ => &Type::String,
                 };
-                let items: Vec<_> = arr.iter().map(|v| self.generate_value(v, inner_type)).collect();
+                let items: Vec<_> = arr
+                    .iter()
+                    .map(|v| self.generate_value(v, inner_type))
+                    .collect();
                 format!("[{}]", items.join(", "))
             }
             Value::Map(map) => {
@@ -448,11 +464,7 @@ impl TypeScriptGenerator {
                     })
                     .collect();
 
-                output.push_str(&format!(
-                    "export type {} = {};\n",
-                    name,
-                    values.join(" | ")
-                ));
+                output.push_str(&format!("export type {} = {};\n", name, values.join(" | ")));
 
                 output.push_str(&format!("export const {} = {{\n", name));
                 for variant in &enum_def.variants {
@@ -540,8 +552,16 @@ impl Generator for TypeScriptGenerator {
 
         for ns in &all_namespaces {
             let module = request.modules.iter().find(|m| &m.namespace == ns);
-            let enums: Vec<&EnumDef> = request.enums.iter().filter(|e| &e.namespace == ns).collect();
-            let aliases: Vec<&TypeAliasDef> = request.aliases.iter().filter(|a| &a.namespace == ns).collect();
+            let enums: Vec<&EnumDef> = request
+                .enums
+                .iter()
+                .filter(|e| &e.namespace == ns)
+                .collect();
+            let aliases: Vec<&TypeAliasDef> = request
+                .aliases
+                .iter()
+                .filter(|a| &a.namespace == ns)
+                .collect();
             let source_file = module.map(|m| m.source_file.as_str());
 
             let (content, mappings) = self.generate_module_file(
@@ -568,7 +588,10 @@ impl Generator for TypeScriptGenerator {
             mappings: vec![],
         });
 
-        CodeGenResponse { files, errors: vec![] }
+        CodeGenResponse {
+            files,
+            errors: vec![],
+        }
     }
 
     fn name(&self) -> &'static str {
@@ -592,7 +615,9 @@ mod tests {
         // r[verify type.duration.ts]
         let generator = TypeScriptGenerator::default();
         let value = generator.generate_value(
-            &Value::Duration { nanoseconds: 30_000_000_000 },
+            &Value::Duration {
+                nanoseconds: 30_000_000_000,
+            },
             &Type::Duration,
         );
         assert_eq!(value, "30000");
@@ -603,7 +628,9 @@ mod tests {
         let mut generator = TypeScriptGenerator::default();
         generator.duration = DurationStyle::Temporal;
         let value = generator.generate_value(
-            &Value::Duration { nanoseconds: 30_000_000_000 },
+            &Value::Duration {
+                nanoseconds: 30_000_000_000,
+            },
             &Type::Duration,
         );
         assert_eq!(value, "Temporal.Duration.from({ milliseconds: 30000 })");
@@ -635,8 +662,14 @@ mod tests {
     fn test_generate_array() {
         let generator = TypeScriptGenerator::default();
         let value = generator.generate_value(
-            &Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]),
-            &Type::Array { element: Box::new(Type::I32) },
+            &Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3),
+            ]),
+            &Type::Array {
+                element: Box::new(Type::I32),
+            },
         );
         assert_eq!(value, "[1, 2, 3]");
     }

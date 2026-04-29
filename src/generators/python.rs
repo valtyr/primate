@@ -5,8 +5,10 @@
 //! namespace type references become relative imports (`from .other import X`).
 
 use super::Generator;
-use crate::ir::{CodeGenRequest, CodeGenResponse, EnumDef, GeneratedFile, Module, SymbolMapping, TypeAliasDef};
-use crate::types::{resolve_alias, to_pascal_case, to_screaming_snake_case, Type, Value};
+use crate::ir::{
+    CodeGenRequest, CodeGenResponse, EnumDef, GeneratedFile, Module, SymbolMapping, TypeAliasDef,
+};
+use crate::types::{Type, Value, resolve_alias, to_pascal_case, to_screaming_snake_case};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 struct LineTracker {
@@ -328,18 +330,16 @@ impl PythonGenerator {
         // Standard imports.
         tracker.push_str("from enum import Enum, IntEnum\n");
         tracker.push_str("from datetime import timedelta\n");
-        tracker.push_str("from typing import List, Dict, Tuple, Optional, Any, NamedTuple, TypeAlias\n");
+        tracker.push_str(
+            "from typing import List, Dict, Tuple, Optional, Any, NamedTuple, TypeAlias\n",
+        );
 
         // Cross-namespace imports.
         if !imports.is_empty() {
             tracker.push_str("\n");
             for (other_ns, names) in &imports {
                 let names: Vec<_> = names.iter().cloned().collect();
-                tracker.push_str(&format!(
-                    "from .{} import {}\n",
-                    other_ns,
-                    names.join(", "),
-                ));
+                tracker.push_str(&format!("from .{} import {}\n", other_ns, names.join(", "),));
             }
         }
         tracker.push_str("\n");
@@ -467,9 +467,16 @@ impl Generator for PythonGenerator {
 
         for ns in &all_namespaces {
             let module = request.modules.iter().find(|m| &m.namespace == ns);
-            let enums: Vec<&EnumDef> = request.enums.iter().filter(|e| &e.namespace == ns).collect();
-            let aliases: Vec<&TypeAliasDef> =
-                request.aliases.iter().filter(|a| &a.namespace == ns).collect();
+            let enums: Vec<&EnumDef> = request
+                .enums
+                .iter()
+                .filter(|e| &e.namespace == ns)
+                .collect();
+            let aliases: Vec<&TypeAliasDef> = request
+                .aliases
+                .iter()
+                .filter(|a| &a.namespace == ns)
+                .collect();
             let source_file = module.map(|m| m.source_file.as_str());
 
             let (content, mappings) = self.generate_module_file(

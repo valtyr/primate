@@ -116,7 +116,9 @@ pub enum Value {
     // Semantic types
     // r[impl ir.value.duration]
     // r[impl type.duration.internal]
-    Duration { nanoseconds: u64 },
+    Duration {
+        nanoseconds: u64,
+    },
 
     // Containers
     Array(Vec<Value>),
@@ -151,10 +153,19 @@ pub fn parse_type(s: &str) -> Result<Type, TypeError> {
         "duration" => return Ok(Type::Duration),
         "regex" => return Ok(Type::Regex),
         "url" => return Ok(Type::Url),
-        "enum" => return Ok(Type::Enum { name: std::string::String::new(), namespace: std::string::String::new() }),
+        "enum" => {
+            return Ok(Type::Enum {
+                name: std::string::String::new(),
+                namespace: std::string::String::new(),
+            });
+        }
         // r[impl type.struct.infer]
         // Struct type - fields will be inferred from value or explicit fields attribute
-        "struct" => return Ok(Type::Struct { fields: HashMap::new() }),
+        "struct" => {
+            return Ok(Type::Struct {
+                fields: HashMap::new(),
+            });
+        }
         _ => {}
     }
 
@@ -166,7 +177,10 @@ pub fn parse_type(s: &str) -> Result<Type, TypeError> {
     }
 
     // Handle optional<T>
-    if let Some(inner) = s.strip_prefix("optional<").and_then(|s| s.strip_suffix('>')) {
+    if let Some(inner) = s
+        .strip_prefix("optional<")
+        .and_then(|s| s.strip_suffix('>'))
+    {
         return Ok(Type::Optional {
             inner: Box::new(parse_type(inner)?),
         });
@@ -184,11 +198,10 @@ pub fn parse_type(s: &str) -> Result<Type, TypeError> {
 
     // Handle tuple<T1,T2,...>
     if let Some(inner) = s.strip_prefix("tuple<").and_then(|s| s.strip_suffix('>')) {
-        let elements: Result<Vec<_>, _> = inner
-            .split(',')
-            .map(|t| parse_type(t.trim()))
-            .collect();
-        return Ok(Type::Tuple { elements: elements? });
+        let elements: Result<Vec<_>, _> = inner.split(',').map(|t| parse_type(t.trim())).collect();
+        return Ok(Type::Tuple {
+            elements: elements?,
+        });
     }
 
     // r[impl diag.error.unknown-type]
@@ -229,9 +242,8 @@ pub fn parse_duration(s: &str) -> Result<u64, ValueError> {
 }
 
 // r[impl type.bytes.format]
-static BYTES_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)?$").unwrap()
-});
+static BYTES_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)?$").unwrap());
 
 /// Parse a byte size string into bytes
 /// Formats: KB, MB, GB, TB, KiB, MiB, GiB, TiB
@@ -361,12 +373,53 @@ pub fn to_pascal_case(s: &str) -> std::string::String {
 /// TypeScript reserved keywords
 // r[impl naming.keyword-escape]
 pub const TS_KEYWORDS: &[&str] = &[
-    "break", "case", "catch", "class", "const", "continue", "debugger", "default",
-    "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for",
-    "function", "if", "import", "in", "instanceof", "new", "null", "return", "super",
-    "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with",
-    "as", "implements", "interface", "let", "package", "private", "protected", "public",
-    "static", "yield", "type",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "as",
+    "implements",
+    "interface",
+    "let",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "static",
+    "yield",
+    "type",
 ];
 
 /// Escape a name if it's a reserved keyword
@@ -424,9 +477,9 @@ pub fn to_screaming_snake_case(s: &str) -> std::string::String {
 pub const RUST_KEYWORDS: &[&str] = &[
     "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for",
     "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
-    "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use",
-    "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final",
-    "macro", "override", "priv", "typeof", "unsized", "virtual", "yield", "try",
+    "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where",
+    "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final", "macro",
+    "override", "priv", "typeof", "unsized", "virtual", "yield", "try",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -509,7 +562,10 @@ mod tests {
         assert_eq!(parse_duration("5m").unwrap(), 5 * 60 * 1_000_000_000);
         assert_eq!(parse_duration("2h").unwrap(), 2 * 60 * 60 * 1_000_000_000);
         assert_eq!(parse_duration("1h30m").unwrap(), 90 * 60 * 1_000_000_000);
-        assert_eq!(parse_duration("2d").unwrap(), 2 * 24 * 60 * 60 * 1_000_000_000);
+        assert_eq!(
+            parse_duration("2d").unwrap(),
+            2 * 24 * 60 * 60 * 1_000_000_000
+        );
     }
 
     #[test]
@@ -554,7 +610,9 @@ mod tests {
     fn test_parse_struct_type() {
         // r[verify type.struct.infer]
         // Struct type is parsed as empty and filled in by parser
-        assert!(matches!(parse_type("struct").unwrap(), Type::Struct { fields } if fields.is_empty()));
+        assert!(
+            matches!(parse_type("struct").unwrap(), Type::Struct { fields } if fields.is_empty())
+        );
     }
 
     #[test]

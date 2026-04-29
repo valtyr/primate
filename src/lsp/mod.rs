@@ -1,20 +1,19 @@
 //! LSP server implementation for .c.toml files
 
 use crate::diagnostics::{Diagnostic as LibDiagnostic, Diagnostics, Severity as LibSeverity};
-use crate::parser::{ast::File as AstFile, parse_source, ConstFile, ParsedProject};
+use crate::parser::{ConstFile, ParsedProject, ast::File as AstFile, parse_source};
 use crate::sourcemap::Sourcemap;
 use lsp_server::{Connection, Message, Request, RequestId, Response};
 use lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionList,
+    CompletionResponse, CompletionTextEdit, Diagnostic, DiagnosticSeverity, GotoDefinitionResponse,
+    Hover, HoverContents, InitializeParams, InsertTextFormat, Location, MarkupContent, MarkupKind,
+    OneOf, Position, PublishDiagnosticsParams, Range, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
     notification::{DidChangeTextDocument, DidOpenTextDocument, Notification, PublishDiagnostics},
     request::{
         Completion, Formatting, GotoDefinition, HoverRequest, References, Request as LspRequest,
     },
-    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionList,
-    CompletionResponse, CompletionTextEdit, Diagnostic, DiagnosticSeverity,
-    GotoDefinitionResponse, Hover, HoverContents, InitializeParams, InsertTextFormat,
-    Location, MarkupContent, MarkupKind, OneOf, Position, PublishDiagnosticsParams,
-    Range, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextEdit, Uri,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -337,7 +336,10 @@ impl ServerState {
             // Check workspace_root/primate.toml
             let config_path = folder.join(&self.config_name);
             if config_path.exists() {
-                eprintln!("[LSP] Found config at workspace root: {}", config_path.display());
+                eprintln!(
+                    "[LSP] Found config at workspace root: {}",
+                    config_path.display()
+                );
                 configs.push(config_path);
             }
             // Check workspace_root/*/primate.toml (one level deep)
@@ -347,7 +349,10 @@ impl ServerState {
                     if entry.path().is_dir() {
                         let sub_config = entry.path().join(&self.config_name);
                         if sub_config.exists() {
-                            eprintln!("[LSP] Found config in subdirectory: {}", sub_config.display());
+                            eprintln!(
+                                "[LSP] Found config in subdirectory: {}",
+                                sub_config.display()
+                            );
                             configs.push(sub_config);
                         }
                     }
@@ -651,8 +656,8 @@ impl ServerState {
             match crate::parser::discover_files(input_dir) {
                 Ok(discovered) => {
                     for mut f in discovered {
-                        let canon = std::fs::canonicalize(&f.path)
-                            .unwrap_or_else(|_| f.path.clone());
+                        let canon =
+                            std::fs::canonicalize(&f.path).unwrap_or_else(|_| f.path.clone());
                         if !seen.insert(canon.clone()) {
                             continue;
                         }
@@ -892,9 +897,7 @@ impl ServerState {
                         path_segs.push(s.clone());
                     }
                     let mut j = i + 1;
-                    while j + 1 < tokens.len()
-                        && matches!(tokens[j].tok, Tok::ColonColon)
-                    {
+                    while j + 1 < tokens.len() && matches!(tokens[j].tok, Tok::ColonColon) {
                         if let Tok::Ident(s) = &tokens[j + 1].tok {
                             path_segs.push(s.clone());
                             j += 2;
@@ -932,9 +935,7 @@ impl ServerState {
                                         },
                                         end: Position {
                                             line: end_span.line.saturating_sub(1),
-                                            character: end_span
-                                                .column
-                                                .saturating_sub(1)
+                                            character: end_span.column.saturating_sub(1)
                                                 + end_span.len(),
                                         },
                                     },
@@ -997,8 +998,7 @@ impl ServerState {
                 }
                 if !e.variants.is_empty() {
                     md.push_str("\n\n**Variants:** ");
-                    let names: Vec<String> =
-                        e.variants.iter().map(|v| v.name.clone()).collect();
+                    let names: Vec<String> = e.variants.iter().map(|v| v.name.clone()).collect();
                     md.push_str(&names.join(", "));
                 }
                 return Some(make_hover(md));
@@ -1099,11 +1099,7 @@ impl ServerState {
                 // numbers, strings, durations, or container literals.
                 let declared = extract_declared_type_from_prefix(&line_prefix);
                 if let Some(ref declared) = declared {
-                    push_value_completions_for_type(
-                        declared,
-                        &project,
-                        &mut completions,
-                    );
+                    push_value_completions_for_type(declared, &project, &mut completions);
 
                     // Unit-suffix completions: when the line prefix ends with
                     // a digit (and optional in-progress alphabetic suffix),
@@ -2026,7 +2022,10 @@ mod tests {
     #[test]
     fn pending_suffix_state_after_digit() {
         let prefix = "u32 X = 3";
-        let pos = Position { line: 0, character: 9 };
+        let pos = Position {
+            line: 0,
+            character: 9,
+        };
         let (range, digits) = pending_suffix_state(prefix, pos).expect("digit yields state");
         // Range covers the digit run `3`; digits string is `"3"`.
         assert_eq!(range.start.character, 8);
@@ -2037,7 +2036,10 @@ mod tests {
     #[test]
     fn pending_suffix_state_with_partial_suffix() {
         let prefix = "duration X = 30m";
-        let pos = Position { line: 0, character: 16 };
+        let pos = Position {
+            line: 0,
+            character: 16,
+        };
         let (range, digits) = pending_suffix_state(prefix, pos).expect("digits+alpha yields state");
         // Range covers `30m`; digits string is `"30"`.
         assert_eq!(range.start.character, 13);
@@ -2048,7 +2050,10 @@ mod tests {
     #[test]
     fn pending_suffix_state_no_digit() {
         let prefix = "LogLevel X = Inf";
-        let pos = Position { line: 0, character: 16 };
+        let pos = Position {
+            line: 0,
+            character: 16,
+        };
         assert!(pending_suffix_state(prefix, pos).is_none());
     }
 
@@ -2056,8 +2061,14 @@ mod tests {
     fn unit_suffix_completions_for_u32() {
         let mut completions = Vec::new();
         let range = Range {
-            start: Position { line: 0, character: 8 },
-            end: Position { line: 0, character: 9 },
+            start: Position {
+                line: 0,
+                character: 8,
+            },
+            end: Position {
+                line: 0,
+                character: 9,
+            },
         };
         push_unit_suffix_completions("u32", range, "3", &mut completions);
         let labels: Vec<_> = completions.iter().map(|c| c.label.as_str()).collect();
@@ -2072,8 +2083,14 @@ mod tests {
     fn unit_suffix_completions_for_duration() {
         let mut completions = Vec::new();
         let range = Range {
-            start: Position { line: 0, character: 13 },
-            end: Position { line: 0, character: 17 },
+            start: Position {
+                line: 0,
+                character: 13,
+            },
+            end: Position {
+                line: 0,
+                character: 17,
+            },
         };
         push_unit_suffix_completions("duration", range, "30", &mut completions);
         let labels: Vec<_> = completions.iter().map(|c| c.label.as_str()).collect();
@@ -2085,10 +2102,7 @@ mod tests {
 
     #[test]
     fn ctx_empty_line_is_decl_start() {
-        assert_eq!(
-            detect_completion_context(""),
-            CompletionContext::DeclStart
-        );
+        assert_eq!(detect_completion_context(""), CompletionContext::DeclStart);
         assert_eq!(
             detect_completion_context("    "),
             CompletionContext::DeclStart
@@ -2194,10 +2208,7 @@ mod tests {
             line: 0,
             character: 6,
         };
-        assert_eq!(
-            qualified_path_at(src, pos),
-            Some("PORT".to_string())
-        );
+        assert_eq!(qualified_path_at(src, pos), Some("PORT".to_string()));
     }
 
     #[test]
