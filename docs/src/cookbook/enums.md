@@ -17,17 +17,20 @@ string   API_VERSION = "v3"
 bool     STRICT_MODE = true
 ```
 
-Generated TypeScript:
+Generated TypeScript (`generated/constants/limits.ts`):
 
 ```typescript
-export const limits = {
-  TIMEOUT: 30_000,
-  MAX_RETRIES: 5,
-  MAX_UPLOAD: 104_857_600,
-  API_VERSION: "v3",
-  STRICT_MODE: true,
-} as const;
+export const timeout = 30_000 as const;
+export const maxRetries = 5 as const;
+export const maxUpload = 104_857_600 as const;
+export const apiVersion = "v3" as const;
+export const strictMode = true as const;
 ```
+
+Plus a sibling `index.ts` re-exporting each namespace as a sub-object,
+so consumers can write
+`import { limits } from "./generated/constants"` and reach for
+`limits.timeout`.
 
 ## A string-tagged enum
 
@@ -52,7 +55,18 @@ Generated TypeScript:
 ```typescript
 /** Operation status. */
 export type Status = "Pending" | "Active" | "Done" | "Failed";
+export const Status = {
+  Pending: "Pending",
+  Active: "Active",
+  Done: "Done",
+  Failed: "Failed",
+} as const;
 ```
+
+The type union gives you compile-time exhaustiveness; the const object
+gives you a runtime handle (`Status.Pending`) for non-literal callsites.
+The `enumStyle` option on the TypeScript generator switches between
+this default ("literal"), a `const` object only, or a real TS `enum`.
 
 ## An integer-backed enum
 
@@ -75,7 +89,7 @@ Generated TypeScript:
 
 ```typescript
 /** Severity, integer-backed for fast filtering. */
-export const enum LogLevel {
+export enum LogLevel {
   Debug = 0,
   Info = 1,
   Warn = 2,
@@ -83,7 +97,7 @@ export const enum LogLevel {
 }
 ```
 
-(Rust generates `#[repr(u8)] pub enum`; Python generates `IntEnum`.)
+(Rust generates `#[repr(i32)] pub enum`; Python generates `IntEnum`.)
 
 ## Per-variant docs
 

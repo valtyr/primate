@@ -16,16 +16,14 @@ Pixel GREEN = [0, 255, 0]
 Pixel BLUE  = [0, 0, 255]
 ```
 
-Generated TypeScript:
+Generated TypeScript (`generated/constants/colors.ts`):
 
 ```typescript
 export type Pixel = [number, number, number];
 
-export const colors = {
-  RED:   [255, 0, 0],
-  GREEN: [0, 255, 0],
-  BLUE:  [0, 0, 255],
-} as const;
+export const red   = [255, 0, 0] as const;
+export const green = [0, 255, 0] as const;
+export const blue  = [0, 0, 255] as const;
 ```
 
 In Rust the same `Pixel` becomes `[u32; 3]`; in Python it's
@@ -65,11 +63,11 @@ export type Mat3 = [
   [number, number, number],
 ];
 
-export const IDENTITY: Mat3 = [
+export const identity = [
   [1, 0, 0],
   [0, 1, 0],
   [0, 0, 1],
-];
+] as const;
 ```
 
 ## Length-mismatch is a hard error

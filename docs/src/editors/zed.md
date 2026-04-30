@@ -5,124 +5,108 @@ primate ships a Zed extension that wires up:
 - a tree-sitter grammar for syntax highlighting,
 - a language server pointing at the `primate lsp` binary.
 
-The extension lives at `editors/zed/` in the project repo. Until it's
-published to the Zed extension registry, you install it as a *dev
-extension*.
+Source lives at
+[`editors/zed/`](https://github.com/valtyr/primate/tree/main/editors/zed)
+in the project repo.
 
-## Install (dev extension)
+## Install
 
-### 1. Install the `primate` binary
+1. Install the `primate` binary so the extension can shell out to
+   `primate lsp`:
 
-Zed shells out to `primate lsp`. Install from a checkout:
+   ```bash
+   cargo install primate --locked
+   ```
 
-```bash
-cd <repo root>
-cargo install --path . --locked
-```
+   The binary lands at `~/.cargo/bin/primate`. As long as that's on
+   your `PATH`, you're set. Otherwise, point Zed at a custom binary
+   path in `settings.json`:
 
-That puts `primate` in `~/.cargo/bin`. Make sure `~/.cargo/bin` is on
-`$PATH`.
+   ```jsonc
+   {
+     "lsp": {
+       "primate": {
+         "binary": {
+           "path": "/absolute/path/to/primate"
+         }
+       }
+     }
+   }
+   ```
 
-If you'd rather not install, point Zed at a custom binary path in
-`settings.json`:
+2. Install the extension from the Zed registry:
 
-```jsonc
-{
-  "lsp": {
-    "primate": {
-      "binary": {
-        "path": "/absolute/path/to/target/debug/primate"
-      }
-    }
-  }
-}
-```
+   - Command palette → **`zed: extensions`** → search "primate" → Install.
 
-### 2. Install the dev extension
+3. Open any `.prim` file. Syntax highlighting and inline diagnostics
+   should appear immediately.
 
-In Zed:
+## What you get
 
-1. Open the command palette: `cmd-shift-p`.
-2. Run **`zed: install dev extension`**.
-3. Pick `editors/zed/` from this repo.
-
-Zed compiles the extension (Rust → wasm), clones the tree-sitter
-grammar from the project's monorepo, builds it to wasm, and reloads.
-Open any `.prim` file to verify highlighting and LSP diagnostics.
-
-### 3. Update the grammar `repository` URL
-
-`editors/zed/extension.toml` has a `file://` URL for the grammar
-source. After cloning the project repo, update that URL to the
-absolute path of *your* checkout:
-
-```toml
-[grammars.primate]
-repository = "file:///absolute/path/to/this/repo"
-rev        = "main"
-path       = "editors/zed/tree-sitter-primate"
-```
-
-This is the cleanest local-dev path: Zed clones the **project repo**
-and finds the grammar source at the `path` sub-directory. No nested
-`.git`, no commit-hash bumping. `rev = "main"` re-fetches the tip on
-every rebuild.
-
-## Iteration
-
-| Change                                     | What to do                                       |
-|--------------------------------------------|--------------------------------------------------|
-| `editors/zed/src/lib.rs` (extension shim)  | `zed: rebuild dev extension`                     |
-| `editors/zed/tree-sitter-primate/grammar.js` | `pnpx tree-sitter-cli generate`, commit, rebuild |
-| `editors/zed/languages/primate/highlights.scm` | Just save — Zed reloads queries on edit       |
-| `primate` binary (the LSP)                 | `cargo install --path . --locked` to refresh    |
-
-To restart only the language server inside Zed: `editor: restart language server`.
+- Tree-sitter syntax highlighting for `.prim` files (keywords, type
+  names, enum variants, unit suffixes on numeric literals).
+- LSP-driven diagnostics, hover, go-to-definition, find-references,
+  format-on-save, and contextual completion.
 
 ## Verifying it works
 
-Open one of `examples/constants/*.prim`. You should see:
+Open one of `examples/constants/*.prim` from a checkout. You should
+see:
 
-- Keywords (`enum`, `type`, `namespace`, `use`) colored as keywords.
-- Type names colored consistently in declarations and `use` statements.
-- Unit suffixes on numeric literals (`30s`, `100MiB`) styled
-  separately.
+- Keywords (`enum`, `type`, `namespace`, `use`) styled as keywords.
+- Type names highlighted consistently in declarations and `use`
+  statements.
+- Unit suffixes (`30s`, `100MiB`) styled separately from the digits.
 - Red squiggles on broken syntax.
 - `cmd-.` formats the buffer (LSP `textDocument/formatting` runs the
   same logic as `primate fmt`).
 - Hover on a type name shows its kind, namespace, and doc comment.
 - Cmd-click on a type name jumps to its declaration.
 
-If diagnostics don't show up, check `~/Library/Logs/Zed/Zed.log` —
-the extension prints `[LSP] ...` messages on stderr.
+If diagnostics don't show, check `~/Library/Logs/Zed/Zed.log` — the
+extension prints `[LSP] ...` messages on stderr. The usual failure is
+"`primate` not on PATH"; either `cargo install primate --locked` or
+set `lsp.primate.binary.path`.
 
-## Publishing later
+## Install as a dev extension
 
-To turn this into a non-dev extension other people can install from
-Zed's UI:
+If you're hacking on the extension itself rather than just using it,
+install the local source as a dev extension:
 
-1. Push the project repo to GitHub.
-2. Update `extension.toml` to the GitHub URL and pin a real commit
-   SHA so installed users get a reproducible grammar build:
+1. Clone the project repo.
+2. In `editors/zed/extension.toml`, change the grammar `repository`
+   from the GitHub URL to a `file://` URL pointing at your local
+   checkout (the registry build clones over HTTPS, but `file://` works
+   for local dev):
 
    ```toml
    [grammars.primate]
-   repository = "https://github.com/<user>/primate"
-   rev        = "<full-sha>"
+   repository = "file:///absolute/path/to/this/repo"
+   rev        = "main"
    path       = "editors/zed/tree-sitter-primate"
    ```
 
-3. Submit a PR to `zed-industries/extensions`.
+3. In Zed: command palette → **`zed: install dev extension`** → pick
+   `editors/zed/`.
+
+Iterating:
+
+| Change                                         | What to do                                       |
+| ---------------------------------------------- | ------------------------------------------------ |
+| `editors/zed/src/lib.rs` (extension shim)      | `zed: rebuild dev extension`                     |
+| `editors/zed/tree-sitter-primate/grammar.js`   | `pnpx tree-sitter-cli generate`, commit, rebuild |
+| `editors/zed/languages/primate/highlights.scm` | Just save — Zed reloads queries on edit          |
+| `primate` binary (the LSP)                     | `cargo install --path . --locked` to refresh     |
+
+To restart only the language server inside Zed: `editor: restart language server`.
 
 ## Why a tree-sitter grammar lives in this repo
 
 primate ships its parser in Rust, but Zed (and other editors) need a
 tree-sitter grammar for syntax highlighting and structural queries.
-Maintaining a parallel tree-sitter grammar inside the project is the
-pragmatic approach: it's tuned for highlighting (not for being a
-spec-compliant parser), and it stays in sync with the Rust parser as
-the language evolves.
+The parallel grammar in `editors/zed/tree-sitter-primate/` is tuned
+for highlighting, not for being a spec-compliant parser. It stays in
+sync with the Rust parser as the language evolves.
 
-If you spot a highlighting gap, it's almost always a fix in
-`editors/zed/tree-sitter-primate/grammar.js` (the grammar) or
-`editors/zed/languages/primate/highlights.scm` (the highlight rules).
+Highlighting gaps are almost always a fix in `grammar.js` (the
+grammar) or `languages/primate/highlights.scm` (the highlight rules).

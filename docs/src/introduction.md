@@ -1,12 +1,7 @@
 # Introduction
 
-**primate** compiles one set of constants into idiomatic, typed code for
+primate compiles one set of constants into idiomatic, typed code for
 Rust, TypeScript, and Python.
-
-You write your constants once — durations, byte sizes, enums, type aliases,
-anything else — in `.prim` files. primate produces well-formed, statically
-typed source for each target language. The same value is reachable by name
-from any of them, and stays in sync as you edit.
 
 ```primate
 // constants/limits.prim
@@ -24,11 +19,12 @@ enum LogLevel: u8 {
 }
 ```
 
-Run `primate build` and you get one file (or directory) per target,
-preserving your namespace structure. The TypeScript output looks like:
+`primate build` reads that file and produces a typed module per target,
+preserving your namespace structure. The TypeScript output:
 
 ```typescript
 // generated/constants/limits.ts
+
 /** Severity, integer-backed for log filtering. */
 export enum LogLevel {
   Debug = 0,
@@ -42,47 +38,47 @@ export const maxRetries = 5 as const;
 export const maxUpload = 104_857_600 as const;
 ```
 
-The Rust and Python outputs are equivalent in shape — `std::time::Duration`
-in Rust, `timedelta` in Python, integer-backed enums in both. See
-[Getting started](./getting-started.md) for the full pipeline.
+The Rust and Python equivalents land in their idiomatic shapes —
+`std::time::Duration` in Rust, `timedelta` in Python, `IntEnum` for
+the integer-backed enum. See [Getting started](./getting-started.md)
+for the full pipeline.
 
 ## Why primate
 
-The problem primate solves is small but persistent: a single project that
-spans languages — a Rust backend, a TypeScript frontend, a Python migration
-script — needs to agree on its constants. Service ports, log levels, byte
-limits, regex patterns. Re-typing them in every language produces three
-copies that drift, three sets of type representations to keep aligned, and
-three review surfaces for the same change.
+If you ship to two or more language ecosystems, you've probably written
+the same `MAX_UPLOAD_SIZE` more than once. The Node service has its own
+copy, the Rust worker has another, the Python script has a third. They
+drift. One ends up wrong. The bug shows up at 2am.
 
-primate lets the source of truth live in one place, with one review, and
-have generated output in the idiomatic shape each target expects:
-`std::time::Duration` in Rust, milliseconds-as-`number` in TypeScript (or
-`Temporal.Duration` if you ask), `timedelta` in Python.
+The usual fixes are awkward. A JSON config file gives up types and
+docs. A shared package only works when the languages can interop.
+Manually keeping things in sync works exactly until it doesn't.
 
-The DSL is type-first and declaration-only. There are no expressions,
-arithmetic, or computed values in the language — just declarations of
-constants, enums, and type aliases. That keeps the surface small and
-predictable.
+primate's angle is to declare constants once and generate them in each
+target's idioms — values bounds-checked at parse time, doc comments
+following the values to every callsite, real cross-namespace imports
+in the generated code. The DSL is type-first and declaration-only;
+there are no expressions, no computed values, no scope for
+arithmetic. The small surface is deliberate.
 
-## What you'll find in this book
+## What you'll find here
 
-- **[Getting started](./getting-started.md)** — install primate, write your
-  first `.prim` file, generate output.
-- **Language** — the `.prim` syntax: declarations, types, values,
+- **[Getting started](./getting-started.md)** — install, first
+  `.prim` file, generated output.
+- **Language** — the full `.prim` syntax: declarations, types, values,
   `use`, attributes, formatting.
 - **CLI** — `primate build`, `primate fmt`, `primate lsp`.
-- **Plugins** — write your own code generator for a target the built-ins
-  don't cover.
-- **Editors** — Zed, VS Code, and Vim setup.
-- **Cookbook** — recipes for common shapes: matrices, enums with metadata,
-  cross-namespace organization, platform-specific output.
-- **Reference** — full grammar, every diagnostic code, and the changelog.
+- **Plugins** — write a generator for a target the built-ins don't
+  cover.
+- **Editors** — VS Code, Zed, and Vim setup.
+- **Cookbook** — recipes for common shapes: matrices, enums with
+  metadata, cross-namespace organization.
+- **Reference** — full grammar, every diagnostic code, the changelog.
 
 ## Status
 
-primate is a young project. The Rust, TypeScript, and Python generators
-work end-to-end. There's an LSP server with editor integrations for
-Zed, VS Code, and Vim.
-
-The [roadmap](./roadmap.md) lists features under consideration.
+primate is at v0.1 — usable, with the Rust, TypeScript, and Python
+generators complete and an LSP server that works in real editors.
+Expect occasional churn as the language settles; the
+[roadmap](./roadmap.md) lists what's under consideration and what's
+explicitly out of scope.

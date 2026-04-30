@@ -1,20 +1,16 @@
 # Getting started
 
-This page walks you from zero to a generated TypeScript module in about
-five minutes. The same `.prim` source produces Rust and Python output too;
-they're enabled the same way (just add another `[generators.*]` block).
+Zero to generated output in about five minutes. The example below uses
+TypeScript; the same `.prim` source produces Rust and Python output by
+adding another `[[output]]` block.
 
 ## Install
 
-primate isn't on crates.io yet — install from a checkout:
-
 ```bash
-git clone https://github.com/valtyr/primate
-cd primate
-cargo install --path . --locked
+cargo install primate --locked
 ```
 
-That puts a release `primate` binary in `~/.cargo/bin`. Verify:
+That puts a `primate` binary at `~/.cargo/bin`. Verify:
 
 ```bash
 primate --version
@@ -145,9 +141,9 @@ significantly better with it on:
 
 Setup per editor:
 
-- **[Zed](./editors/zed.md)** — install the dev extension.
-- **[VS Code](./editors/vscode.md)** — install the extension.
-- **[Vim](./editors/vim.md)** — drop the syntax/ftdetect files in.
+- **[VS Code](./editors/vscode.md)** — install from the Marketplace.
+- **[Zed](./editors/zed.md)** — install from the Zed extensions registry.
+- **[Vim](./editors/vim.md)** — drop the syntax/ftdetect files into your runtime path.
 
 ## Next steps
 
