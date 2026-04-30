@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/valtyr/primate/main/assets/logo.svg" alt="primate" width="120" align="left" />
+
 # primate — VS Code extension
 
 VS Code language support for [`primate`](https://github.com/valtyr/primate),

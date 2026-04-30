@@ -1,3 +1,5 @@
+<img src="./assets/logo.svg" alt="primate" width="120" align="left" />
+
 # primate
 
 [![CI](https://github.com/valtyr/primate/actions/workflows/ci.yml/badge.svg)](https://github.com/valtyr/primate/actions/workflows/ci.yml)
