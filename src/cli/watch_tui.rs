@@ -208,14 +208,17 @@ fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_header(f: &mut Frame, area: ratatui::layout::Rect) {
+    // Use ANSI `Magenta` + bold rather than the literal brand purple
+    // (#3027D4) from the logo: each terminal themes the named ANSI
+    // colors to fit its own foreground/background, so the header reads
+    // legibly on both light and dark color schemes. The fixed RGB had
+    // poor contrast (~3.5:1) on dark terminals.
+    let style = Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
     let lines: Vec<Line> = HEADER
         .iter()
-        .map(|line| {
-            Line::from(Span::styled(
-                *line,
-                Style::default().fg(Color::Rgb(0x30, 0x27, 0xD4)), // brand purple from logo.svg
-            ))
-        })
+        .map(|line| Line::from(Span::styled(*line, style)))
         .collect();
     let block = Block::default().borders(Borders::BOTTOM);
     let para = Paragraph::new(lines).block(block);
