@@ -2,6 +2,8 @@
 //!
 //! Implements command-line argument parsing and command dispatch.
 
+mod watch_tui;
+
 use crate::config::Config;
 use crate::diagnostics::{Diagnostics, Severity};
 use crate::generators::Generator;
@@ -82,6 +84,15 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
+
+    /// Write a primate skill file for AI coding agents (a terse cheat-sheet
+    /// covering syntax, setup, and common patterns).
+    Skill {
+        /// Output path. Defaults to `.claude/skills/primate/SKILL.md`
+        /// (Claude Code's project-local skill convention). Pass `-` to
+        /// write to stdout.
+        path: Option<PathBuf>,
+    },
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -111,6 +122,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Fmt { paths, check }) => {
             run_fmt(&cli.config, paths, check)?;
+        }
+        Some(Command::Skill { path }) => {
+            run_skill(path)?;
         }
         None => {
             // r[impl cli.default-config]
@@ -403,35 +417,33 @@ fn run_generate_watch(
     config_path: &PathBuf,
     input_override: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load(config_path)?;
-    let input_dir = input_override.as_ref().unwrap_or(&config.input).clone();
+    watch_tui::run(config_path.clone(), input_override)
+}
 
-    // Initial generate
-    eprintln!("Watching {} for changes...", input_dir.display());
-    let _ = run_generate(config_path, input_override.clone(), None);
 
-    // Set up file watcher
-    let (tx, rx) = channel();
-    let mut debouncer = new_debouncer(Duration::from_millis(500), tx)?;
+fn run_skill(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+    const SKILL: &str = include_str!("./skill.md");
 
-    debouncer
-        .watcher()
-        .watch(&input_dir, RecursiveMode::Recursive)?;
+    let target = path.unwrap_or_else(|| {
+        PathBuf::from(".claude/skills/primate/SKILL.md")
+    });
 
-    loop {
-        match rx.recv() {
-            Ok(Ok(_events)) => {
-                eprintln!("\n--- File changed, regenerating ---\n");
-                let _ = run_generate(config_path, input_override.clone(), None);
-            }
-            Ok(Err(e)) => eprintln!("Watch error: {:?}", e),
-            Err(e) => {
-                eprintln!("Channel error: {:?}", e);
-                break;
-            }
-        }
+    if target == PathBuf::from("-") {
+        print!("{}", SKILL);
+        return Ok(());
     }
 
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!("creating directory {}: {}", parent.display(), e)
+            })?;
+        }
+    }
+    std::fs::write(&target, SKILL).map_err(|e| {
+        format!("writing skill to {}: {}", target.display(), e)
+    })?;
+    eprintln!("Wrote primate skill to {}", target.display());
     Ok(())
 }
 
@@ -592,7 +604,7 @@ fn print_diagnostics(diagnostics: &Diagnostics) {
     }
 }
 
-fn toml_to_json(value: &toml::Value) -> serde_json::Value {
+pub(crate) fn toml_to_json(value: &toml::Value) -> serde_json::Value {
     match value {
         toml::Value::String(s) => serde_json::Value::String(s.clone()),
         toml::Value::Integer(i) => serde_json::Value::Number((*i).into()),
