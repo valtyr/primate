@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "primate",
   "scopeName": "source.primate",
-  "fileTypes": ["const"],
+  "fileTypes": ["prim"],
   "patterns": [
     { "include": "#file-doc" },
     { "include": "#doc-comment" },

@@ -1,5 +1,19 @@
-import * as path from "path";
-import { workspace, ExtensionContext, window, commands, languages, Uri, Position, Location, Range, DefinitionProvider, ReferenceProvider, TextDocument, CancellationToken, ProviderResult, Definition } from "vscode";
+import {
+  workspace,
+  ExtensionContext,
+  window,
+  commands,
+  languages,
+  Uri,
+  Position,
+  Location,
+  Range,
+  DefinitionProvider,
+  ReferenceProvider,
+  TextDocument,
+  CancellationToken,
+  Definition,
+} from "vscode";
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -9,235 +23,219 @@ import {
   RequestType,
   TextDocumentIdentifier,
   Position as LSPPosition,
-  Location as LSPLocation
+  Location as LSPLocation,
 } from "vscode-languageclient/node";
 
 let client: LanguageClient;
 
-// Custom LSP Request Types
+// Custom requests primate's LSP exposes for source-mapped navigation between
+// .prim files and the generated targets (e.g. jump from `LogLevel.Info` in a
+// generated .ts file back to its source declaration in limits.prim).
 interface GeneratedPositionsParams {
   text_document: TextDocumentIdentifier;
   position: LSPPosition;
 }
-
-const GeneratedPositionsRequest = new RequestType<GeneratedPositionsParams, LSPLocation[], void>("primate/generatedPositions");
+const GeneratedPositionsRequest = new RequestType<
+  GeneratedPositionsParams,
+  LSPLocation[],
+  void
+>("primate/generatedPositions");
 
 interface ResolveSourceLocationParams {
   uri: string;
   line: number;
 }
+const ResolveSourceLocationRequest = new RequestType<
+  ResolveSourceLocationParams,
+  LSPLocation | null,
+  void
+>("primate/resolveSourceLocation");
 
-const ResolveSourceLocationRequest = new RequestType<ResolveSourceLocationParams, LSPLocation | null, void>("primate/resolveSourceLocation");
+// Languages we walk when chasing a generated symbol back to its `.prim` source.
+const GENERATED_LANGUAGES = ["typescript", "javascript", "rust", "python"];
 
 export function activate(context: ExtensionContext) {
-  try {
-    console.log('Activating primate-vscode extension...');
-    
-    // Get the server path from configuration
-    const config = workspace.getConfiguration("primate");
-    const serverPath = config.get<string>("server.path") || "primate";
-    console.log(`Using server path: ${serverPath}`);
+  const config = workspace.getConfiguration("primate");
+  const serverPath = config.get<string>("server.path") || "primate";
 
-    // Server options
-    const run: Executable = {
-      command: serverPath,
-      args: ["lsp"],
-      transport: TransportKind.stdio,
-    };
+  const run: Executable = {
+    command: serverPath,
+    args: ["lsp"],
+    transport: TransportKind.stdio,
+  };
 
-    const serverOptions: ServerOptions = {
-      run,
-      debug: run,
-    };
+  const serverOptions: ServerOptions = {
+    run,
+    debug: run,
+  };
 
-    // Client options
-    const clientOptions: LanguageClientOptions = {
-      documentSelector: [
-        { scheme: "file", language: "toml", pattern: "**/*.c.toml" },
-        { scheme: "file", language: "toml", pattern: "**/primate.toml" },
+  const clientOptions: LanguageClientOptions = {
+    // Activate for the `primate` language (registered in package.json's
+    // `contributes.languages`). The synchronize block also forwards
+    // primate.toml changes so the LSP can re-resolve namespaces when
+    // the project's input directory changes.
+    documentSelector: [
+      { scheme: "file", language: "primate" },
+      { scheme: "file", pattern: "**/primate.toml" },
+    ],
+    synchronize: {
+      fileEvents: [
+        workspace.createFileSystemWatcher("**/*.prim"),
+        workspace.createFileSystemWatcher("**/primate.toml"),
       ],
-      synchronize: {
-        fileEvents: [
-          workspace.createFileSystemWatcher("**/*.c.toml"),
-          workspace.createFileSystemWatcher("**/primate.toml"),
-        ],
-      },
-      outputChannelName: "primate LSP",
-    };
+    },
+    outputChannelName: "primate LSP",
+  };
 
-    // Create the client and start it
-    client = new LanguageClient(
-      "primate",
-      "primate LSP",
-      serverOptions,
-      clientOptions,
+  client = new LanguageClient(
+    "primate",
+    "primate LSP",
+    serverOptions,
+    clientOptions,
+  );
+
+  // Cross-target navigation. `provideReferences` jumps from a constant in a
+  // .prim file to its generated-target callsites; `provideDefinition` does the
+  // reverse — given a symbol in generated code, it returns the `.prim` source.
+  context.subscriptions.push(
+    languages.registerReferenceProvider(
+      { scheme: "file", language: "primate" },
+      new PrimateReferenceProvider(),
+    ),
+    languages.registerDefinitionProvider(
+      GENERATED_LANGUAGES,
+      new PrimateDefinitionProvider(),
+    ),
+  );
+
+  client
+    .start()
+    .catch((e) =>
+      window.showErrorMessage(`primate LSP failed to start: ${e}`),
     );
 
-    // Register Providers
-    context.subscriptions.push(
-      languages.registerReferenceProvider(
-        { scheme: "file", language: "toml", pattern: "**/*.c.toml" },
-        new CConsttReferenceProvider()
-      ),
-      languages.registerDefinitionProvider(
-        ["typescript", "javascript", "rust", "python"],
-        new CConsttDefinitionProvider()
-      )
-    );
-
-    // Start the client. This will also launch the server
-    client.start().then(() => {
-        console.log("primate LSP client started successfully.");
-    }).catch(e => {
-        console.error("primate LSP client failed to start:", e);
-    });
-
-    // Register restart command
-    context.subscriptions.push(
-      commands.registerCommand("primate.restartServer", async () => {
-        if (client) {
-          try {
-             await client.stop();
-          } catch (e) {
-             console.error("Failed to stop client:", e);
-          }
-        }
-        client.start().catch(e => console.error("Failed to restart client:", e));
-        window.showInformationMessage("primate LSP server restarted");
-      })
-    );
-    
-    console.log('Congratulations, your extension "primate-vscode" is now active!');
-  } catch (e) {
-    console.error("Failed to activate primate-vscode:", e);
-    window.showErrorMessage(`Failed to activate primate extension: ${e}`);
-  }
+  context.subscriptions.push(
+    commands.registerCommand("primate.restartServer", async () => {
+      try {
+        await client.stop();
+      } catch {
+        // ignore — we're about to restart it
+      }
+      client
+        .start()
+        .catch((e) =>
+          window.showErrorMessage(`primate LSP failed to restart: ${e}`),
+        );
+      window.showInformationMessage("primate LSP server restarted");
+    }),
+  );
 }
 
 export function deactivate(): Thenable<void> | undefined {
-  if (!client) {
-    return undefined;
-  }
-  return client.stop();
+  return client?.stop();
 }
 
 /**
- * Provides references from .c.toml source to application code
+ * From a constant in a `.prim` file, find every callsite in generated code.
+ *
+ * Asks the LSP for the symbol's positions in generated files (via the
+ * sourcemap), then runs VS Code's built-in reference provider against each
+ * of those positions to collect callsites.
  */
-class CConsttReferenceProvider implements ReferenceProvider {
+class PrimateReferenceProvider implements ReferenceProvider {
   async provideReferences(
     document: TextDocument,
     position: Position,
-    context: { includeDeclaration: boolean },
-    token: CancellationToken
+    _context: { includeDeclaration: boolean },
+    token: CancellationToken,
   ): Promise<Location[]> {
     if (!client) return [];
 
-    try {
-      // 1. Ask LSP for generated positions
-      const params: GeneratedPositionsParams = {
-        text_document: { uri: document.uri.toString() },
-        position: { line: position.line, character: position.character },
-      };
-      
-      const generatedLocations = await client.sendRequest(GeneratedPositionsRequest, params, token);
-      if (!generatedLocations || generatedLocations.length === 0) return [];
+    const params: GeneratedPositionsParams = {
+      text_document: { uri: document.uri.toString() },
+      position: { line: position.line, character: position.character },
+    };
 
-      const results: Location[] = [];
+    const generatedLocations = await client.sendRequest(
+      GeneratedPositionsRequest,
+      params,
+      token,
+    );
+    if (!generatedLocations || generatedLocations.length === 0) return [];
 
-      // 2. For each generated location, ask VS Code for references
-      for (const loc of generatedLocations) {
-        const uri = Uri.parse(loc.uri);
-        const pos = new Position(loc.range.start.line, loc.range.start.character);
-        
-        // Execute built-in reference provider
-        const refs = await commands.executeCommand<Location[]>(
-          "vscode.executeReferenceProvider",
-          uri,
-          pos
-        );
-
-        if (refs) {
-          results.push(...refs);
-        }
-      }
-
-      return results;
-    } catch (e) {
-      console.error("Error providing references:", e);
-      return [];
+    const results: Location[] = [];
+    for (const loc of generatedLocations) {
+      const refs = await commands.executeCommand<Location[]>(
+        "vscode.executeReferenceProvider",
+        Uri.parse(loc.uri),
+        new Position(loc.range.start.line, loc.range.start.character),
+      );
+      if (refs) results.push(...refs);
     }
+    return results;
   }
 }
 
 /**
- * Provides definitions from application code back to .c.toml source
+ * From a generated symbol, jump back to its `.prim` source.
+ *
+ * Runs VS Code's built-in definition provider for the symbol, then asks the
+ * LSP whether any of the resulting locations are inside generated files —
+ * if so, it resolves them back to the originating `.prim` line via the
+ * sourcemap.
  */
-class CConsttDefinitionProvider implements DefinitionProvider {
-  // Re-entrancy guard to prevent infinite recursion
+class PrimateDefinitionProvider implements DefinitionProvider {
+  // Re-entrancy guard: we call back into the built-in definition provider,
+  // which can re-enter this method if a chain of definitions exists.
   private processing = new Set<string>();
 
   async provideDefinition(
     document: TextDocument,
     position: Position,
-    token: CancellationToken
+    token: CancellationToken,
   ): Promise<Definition | null> {
     if (!client) return null;
 
     const key = `${document.uri.toString()}:${position.line}:${position.character}`;
-    if (this.processing.has(key)) {
-      return null;
-    }
+    if (this.processing.has(key)) return null;
 
     try {
       this.processing.add(key);
 
-      // 1. Ask standard providers where this symbol is defined
-      const definitions = await commands.executeCommand<(Location | { targetUri: Uri, targetRange: Range })[]>(
-        "vscode.executeDefinitionProvider",
-        document.uri,
-        position
-      );
+      const definitions = await commands.executeCommand<
+        (Location | { targetUri: Uri; targetRange: Range })[]
+      >("vscode.executeDefinitionProvider", document.uri, position);
 
       if (!definitions || definitions.length === 0) return null;
 
-      // 2. Check if any definition maps back to source
       for (const def of definitions) {
-        // Handle both Location and LocationLink
         let uri: Uri;
         let line: number;
-
         if ("targetUri" in def) {
-           uri = def.targetUri;
-           line = def.targetRange.start.line;
+          uri = def.targetUri;
+          line = def.targetRange.start.line;
         } else {
-           uri = def.uri;
-           line = def.range.start.line;
+          uri = def.uri;
+          line = def.range.start.line;
         }
 
-        // Ask LSP to resolve
-        const params: ResolveSourceLocationParams = {
-          uri: uri.toString(),
-          line: line,
-        };
-
-        const sourceLoc = await client.sendRequest(ResolveSourceLocationRequest, params, token);
-
+        const sourceLoc = await client.sendRequest(
+          ResolveSourceLocationRequest,
+          { uri: uri.toString(), line },
+          token,
+        );
         if (sourceLoc) {
-          const sourceUri = Uri.parse(sourceLoc.uri);
-          const sourceRange = new Range(
-            sourceLoc.range.start.line,
-            sourceLoc.range.start.character,
-            sourceLoc.range.end.line,
-            sourceLoc.range.end.character
+          return new Location(
+            Uri.parse(sourceLoc.uri),
+            new Range(
+              sourceLoc.range.start.line,
+              sourceLoc.range.start.character,
+              sourceLoc.range.end.line,
+              sourceLoc.range.end.character,
+            ),
           );
-          return new Location(sourceUri, sourceRange);
         }
       }
-
-      return null;
-    } catch (e) {
-      console.error("Error providing definition:", e);
       return null;
     } finally {
       this.processing.delete(key);
