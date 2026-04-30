@@ -37,9 +37,8 @@ the GitHub repo:
 | Secret                  | Purpose                                                 | How to get it |
 | ----------------------- | ------------------------------------------------------- | ------------- |
 | `CARGO_REGISTRY_TOKEN`  | `cargo publish` to crates.io.                           | <https://crates.io/settings/tokens> — needs `publish-update` for `primate`. |
-| `RELEASE_TOKEN`         | release-plz uses this instead of the default `GITHUB_TOKEN`. The default token can't trigger downstream workflows, so without a PAT here, the `v*` tag release-plz pushes would *not* fire `publish-extensions.yml`. | GitHub PAT (classic) with **repo** + **workflow** scopes. |
 | `VSCE_PAT`              | `vsce publish` to VS Code Marketplace.                  | Azure DevOps PAT, scope **Marketplace → Manage**. <https://aka.ms/vscode-marketplace-manage-publishers> |
-| `COMMITTER_TOKEN`       | Open the PR to `zed-industries/extensions`.             | GitHub PAT (classic) with **repo** + **workflow** scopes. The PAT's user must have a fork of `zed-industries/extensions` named in the workflow's `push-to:` field. |
+| `COMMITTER_TOKEN`       | Used by both workflows: by `release-plz` so the v* tag it pushes fires downstream workflows (the default `GITHUB_TOKEN` doesn't), and by `huacnlee/zed-extension-action` to open the PR to `zed-industries/extensions`. | GitHub PAT (classic) with **repo** + **workflow** scopes. The PAT's user must have a fork of `zed-industries/extensions` named in the publish workflow's `push-to:` field. |
 
 To also publish to **Open VSX** (the open-source registry used by
 VSCodium et al.), add a step that runs `npx --yes ovsx publish --pat
