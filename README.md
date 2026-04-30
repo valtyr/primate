@@ -1,4 +1,6 @@
-<img src="./assets/logo.svg" alt="primate" width="120" align="left" />
+<img src="./assets/logo.svg" alt="primate" width="120" />
+
+<br/>
 
 # primate
 

@@ -1,4 +1,6 @@
-<img src="https://raw.githubusercontent.com/valtyr/primate/main/assets/logo.png" alt="primate" width="120" align="left" />
+<img src="https://raw.githubusercontent.com/valtyr/primate/main/assets/logo.png" alt="primate" width="120" />
+
+<br/>
 
 # primate — VS Code extension
 
