@@ -1,78 +1,86 @@
 # VS Code
 
 primate ships a VS Code extension that provides syntax highlighting
-and connects to the `primate lsp` server. The extension lives at
-`editors/vscode/` in the project repo.
+and connects to the `primate lsp` server. Source lives at
+[`editors/vscode/`](https://github.com/valtyr/primate/tree/main/editors/vscode)
+in the project repo.
 
-## Install (development)
+## Install
 
-The extension isn't on the marketplace yet. Install from source:
+1. Install the `primate` binary so the extension can shell out to
+   `primate lsp`:
 
-### 1. Install the `primate` binary
+   ```bash
+   cargo install primate --locked
+   ```
 
-```bash
-cd <repo root>
-cargo install --path . --locked
-```
+   The binary lands at `~/.cargo/bin/primate`. As long as that's on
+   your `PATH`, you're set. If you'd rather point the extension at a
+   custom path, set `primate.server.path` in your VS Code settings.
 
-VS Code's extension expects `primate` to be on `$PATH` so it can spawn
-`primate lsp`.
+2. Install the extension from the Marketplace:
 
-### 2. Install the extension
+   - <https://marketplace.visualstudio.com/items?itemName=valtyr.primate-vscode>
+   - Or in VS Code: **Extensions** sidebar → search "primate" → Install.
 
-```bash
-cd editors/vscode
-pnpm install
-pnpm run package        # produces a .vsix
-code --install-extension primate-*.vsix
-```
-
-Or run the extension in development mode:
-
-1. Open `editors/vscode/` in VS Code.
-2. Press `F5` — that launches an "Extension Development Host" window
-   with the extension loaded.
+3. Open any `.prim` file. Syntax highlighting and inline diagnostics
+   should appear immediately.
 
 ## What you get
 
 - Syntax highlighting via a TextMate grammar
   (`editors/vscode/primate.tmLanguage.json`).
-- LSP diagnostics, hover, go-to-definition, find references,
-  completion, and formatting via `primate lsp`.
+- LSP-driven diagnostics, hover, go-to-definition, find-references,
+  format-on-save, and contextual completion (enum variants, unit
+  suffixes).
+- **Cross-target navigation**: from a constant in a `.prim` file, find
+  references jumps to its callsites in generated TypeScript / Rust /
+  Python; from a generated symbol, go-to-definition resolves back to
+  the originating `.prim` line via the sourcemap.
+- JSON schema validation for `primate.toml`.
 
-## Configuration
+## Settings
 
-The extension's contributions in `package.json`:
+| Setting               | Default     | Description                                                    |
+| --------------------- | ----------- | -------------------------------------------------------------- |
+| `primate.server.path` | `"primate"` | Path to the `primate` executable. Defaults to looking on PATH. |
 
-- `extensions: [".prim"]` — files with this extension auto-detect as
-  primate.
-- `aliases: ["primate"]` — language ID + display name.
-- A "primate" command category for any commands the extension
-  exposes.
+## Commands
+
+- **primate: Restart LSP Server** — kill and re-launch the language
+  server. Useful when you've upgraded the CLI binary.
 
 ## Troubleshooting
 
-If the language server doesn't start, check the **Output** panel →
-**primate** for errors. The extension launches `primate lsp` and pipes
-LSP messages over stdio; if `primate` isn't on `$PATH`, it'll fail at
-startup.
+If the extension activates but diagnostics never show, the language
+server probably failed to start. Check **Output** panel → **primate
+LSP** for the error message. Common causes:
 
-## Status
+- `primate` isn't on `PATH`. Run `which primate` from a terminal; if
+  empty, either `cargo install primate --locked` or set
+  `primate.server.path` to an absolute path.
+- The CLI version doesn't match the extension. Run
+  `primate --version` to confirm. Older CLIs may not implement
+  some LSP requests the extension expects (e.g. cross-target
+  navigation is added in v0.1+).
 
-The VS Code extension is less polished than the Zed integration today.
-Specifically:
+## Install from source (development)
 
-- The TextMate grammar is hand-written and less accurate than
-  tree-sitter's structural rules.
-- A few features (e.g. some completion contexts) are LSP-driven
-  uniformly; if VS Code shows different results from Zed, that
-  difference is on the editor side, not the LSP.
+If you're hacking on the extension itself rather than just using it:
 
-## Publishing later
+```bash
+cd editors/vscode
+npm install
+npm run compile
+```
 
-To publish to the VS Code marketplace:
+Then in VS Code, open `editors/vscode/` and press **F5** — that
+launches an "Extension Development Host" window with the in-progress
+extension loaded.
 
-1. Update `editors/vscode/package.json` with a real publisher and
-   repository URL.
-2. `pnpm run package` to produce a `.vsix`.
-3. `vsce publish` (requires a Visual Studio Marketplace account).
+To package a `.vsix` locally without publishing:
+
+```bash
+npx --yes @vscode/vsce package
+code --install-extension primate-vscode-*.vsix
+```

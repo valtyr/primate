@@ -108,9 +108,9 @@ don't cover, there's a stdin/stdout plugin protocol.
 
 ### Editor support
 
-- **[Zed](./editors/zed)** — install as a dev extension.
-- **[VS Code](./editors/vscode)** — install the extension locally.
-- **[Vim](./editors/vim)** — syntax + ftdetect files.
+- **[VS Code](https://marketplace.visualstudio.com/items?itemName=valtyr.primate-vscode)** — install from the Marketplace.
+- **[Zed](https://zed.dev/extensions?query=primate)** — install from the Zed extensions registry.
+- **Vim** — drop the [syntax + ftdetect files](./editors/vim) into your runtime path.
 
 ### Documentation
 
