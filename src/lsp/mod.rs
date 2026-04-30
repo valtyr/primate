@@ -1576,6 +1576,25 @@ fn push_unit_suffix_completions(
         _ => return,
     };
 
+    // Bare-number completion. Pinned to the top of the menu via `sort_text`
+    // so a user typing a numeric literal can dismiss the popup with Enter
+    // and end up with the unsuffixed value. Selecting it is effectively a
+    // no-op when the buffer already contains just digits — the textEdit
+    // replaces the digits-plus-any-partial-suffix range with just the
+    // digits, so a half-typed `30m` cleanly collapses back to `30`.
+    completions.push(CompletionItem {
+        label: digits.to_string(),
+        kind: Some(CompletionItemKind::VALUE),
+        detail: Some("no unit suffix".to_string()),
+        sort_text: Some("0".to_string()),
+        filter_text: Some(digits.to_string()),
+        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            range,
+            new_text: digits.to_string(),
+        })),
+        ..Default::default()
+    });
+
     for (suffix, detail) in suffixes {
         let inserted = format!("{}{}", digits, suffix);
         completions.push(CompletionItem {
@@ -1587,9 +1606,8 @@ fn push_unit_suffix_completions(
             label: inserted.clone(),
             kind: Some(CompletionItemKind::UNIT),
             detail: Some(detail.to_string()),
-            // Sort by the suffix only so they don't all collide on the
-            // leading digits when ordered alphabetically.
-            sort_text: Some(format!("0_{}", suffix)),
+            // Sort the suffixed items below the bare option (`0`).
+            sort_text: Some(format!("1_{}", suffix)),
             filter_text: Some(inserted.clone()),
             text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                 range,
@@ -2072,10 +2090,20 @@ mod tests {
         };
         push_unit_suffix_completions("u32", range, "3", &mut completions);
         let labels: Vec<_> = completions.iter().map(|c| c.label.as_str()).collect();
+        assert!(labels.contains(&"3"), "bare option missing: {:?}", labels);
         assert!(labels.contains(&"3KB"), "got {:?}", labels);
         assert!(labels.contains(&"3MiB"), "got {:?}", labels);
-        // Filter text and label match so the editor's prefix filter accepts them.
+        // The bare option sorts above every suffixed one — the user-facing
+        // contract is that hitting Enter on a fresh `30` keeps it bare.
+        let bare = completions.iter().find(|c| c.label == "3").unwrap();
         let kb = completions.iter().find(|c| c.label == "3KB").unwrap();
+        assert!(
+            bare.sort_text.as_deref() < kb.sort_text.as_deref(),
+            "bare must sort before {:?}: {:?} vs {:?}",
+            kb.label,
+            bare.sort_text,
+            kb.sort_text,
+        );
         assert_eq!(kb.filter_text.as_deref(), Some("3KB"));
     }
 
@@ -2094,6 +2122,7 @@ mod tests {
         };
         push_unit_suffix_completions("duration", range, "30", &mut completions);
         let labels: Vec<_> = completions.iter().map(|c| c.label.as_str()).collect();
+        assert!(labels.contains(&"30"), "bare option missing: {:?}", labels);
         assert!(labels.contains(&"30ms"), "got {:?}", labels);
         assert!(labels.contains(&"30min"), "got {:?}", labels);
         let min = completions.iter().find(|c| c.label == "30min").unwrap();
