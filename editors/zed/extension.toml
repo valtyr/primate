@@ -1,7 +1,7 @@
 id = "primate"
 name = "primate"
 description = "Language support for the primate constant DSL"
-version = "0.1.4"
+version = "0.1.5"
 schema_version = 1
 authors = ["Valtýr Örn Kjartansson <valtyr@gmail.com>"]
 repository = "https://github.com/valtyr/primate"

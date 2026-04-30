@@ -2,7 +2,7 @@
   "name": "primate-vscode",
   "displayName": "primate",
   "description": "LSP client for primate",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "valtyr",
   "license": "MIT",
   "repository": {
