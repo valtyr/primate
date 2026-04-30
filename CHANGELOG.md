@@ -5,6 +5,17 @@ All notable changes to **primate** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4](https://github.com/valtyr/primate/compare/v0.1.3...v0.1.4) - 2026-04-30
+
+### Added
+
+- *(lsp)* pin bare-number completion above unit suffixes
+
+### Other
+
+- link editor list to marketplaces; rewrite vscode install guide
+- add vertical space between logo and heading in READMEs
+
 ## [0.1.3](https://github.com/valtyr/primate/compare/v0.1.2...v0.1.3) - 2026-04-30
 
 ### Added
