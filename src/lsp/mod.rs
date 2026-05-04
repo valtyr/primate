@@ -774,6 +774,25 @@ impl ServerState {
     }
 
     fn goto_definition(&mut self, uri: &Uri, position: Position) -> Option<GotoDefinitionResponse> {
+        // First, try the sourcemap. This covers go-to-def on a
+        // generated symbol — the line in `limits.ts` lookup-tables
+        // back to its `limits.prim` declaration. Only fires when the
+        // (uri, line) pair matches a sourcemap entry's output side,
+        // so it's a no-op for `.prim` files (whose lines never appear
+        // as outputs) and for any file outside a primate project.
+        if let Some(loc) = self.resolve_source_location(uri, position.line) {
+            return Some(GotoDefinitionResponse::Scalar(loc));
+        }
+
+        // Fall through to primate-DSL goto-def only for `.prim`
+        // files. For any other file (a regular `.ts`/`.rs`/`.py`
+        // that isn't a generated primate output), returning None
+        // lets the editor route the request to the language's own
+        // LSP unmolested.
+        if !is_primate_uri(uri) {
+            return None;
+        }
+
         let content = self.documents.get(uri)?.clone();
         let path = qualified_path_at(&content, position)?;
         let segments: Vec<&str> = path.split("::").collect();
@@ -813,6 +832,9 @@ impl ServerState {
 
     /// Find every reference to the type at `position` across the workspace.
     fn references(&mut self, uri: &Uri, position: Position) -> Option<Vec<Location>> {
+        if !is_primate_uri(uri) {
+            return None;
+        }
         let content = self.documents.get(uri)?.clone();
         let target = qualified_path_at(&content, position)?;
         let segments: Vec<&str> = target.split("::").collect();
@@ -954,6 +976,9 @@ impl ServerState {
         Some(locations)
     }
     fn hover(&mut self, uri: &Uri, position: Position) -> Option<Hover> {
+        if !is_primate_uri(uri) {
+            return None;
+        }
         let content = self.documents.get(uri)?.clone();
         let path = qualified_path_at(&content, position)?;
         let segments: Vec<&str> = path.split("::").collect();
@@ -1036,6 +1061,9 @@ impl ServerState {
     }
 
     fn completion(&mut self, uri: &Uri, position: Position) -> Option<CompletionResponse> {
+        if !is_primate_uri(uri) {
+            return None;
+        }
         let content = self.documents.get(uri)?.clone();
 
         // Compute byte offset of the cursor and grab the current line up to it.
@@ -1127,6 +1155,9 @@ impl ServerState {
     }
 
     fn formatting(&self, uri: &Uri) -> Option<Vec<TextEdit>> {
+        if !is_primate_uri(uri) {
+            return None;
+        }
         let content = self.documents.get(uri)?.clone();
         let formatted = match crate::formatter::format_source(&content) {
             Ok(s) => s,
@@ -1990,6 +2021,22 @@ fn format_type(t: &crate::types::Type) -> String {
         Type::Alias { name, .. } => name.clone(),
         Type::Struct { .. } => "<struct>".into(),
     }
+}
+
+/// True if `uri` points at a `.prim` file. Used to gate
+/// primate-LSP-only handlers (hover, references, completion,
+/// formatting) so the server stays silent on the
+/// `typescript`/`rust`/`python` files it's also wired up to —
+/// goto-definition handles those via the sourcemap directly.
+fn is_primate_uri(uri: &Uri) -> bool {
+    url::Url::parse(uri.as_str())
+        .ok()
+        .and_then(|u| u.to_file_path().ok())
+        .and_then(|p| {
+            p.extension()
+                .map(|e| e.to_string_lossy().eq_ignore_ascii_case("prim"))
+        })
+        .unwrap_or(false)
 }
 
 fn cast_request<R>(req: Request) -> Result<(RequestId, R::Params), Request>
