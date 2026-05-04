@@ -180,30 +180,98 @@ fn restore_terminal(
 // Rendering
 // ────────────────────────────────────────────────────────────────────
 
+/// Width of the braille banner in monospace cells. Each braille glyph
+/// (U+28xx) is single-width in every modern terminal font.
+const LOGO_COLS: u16 = 34;
+
+/// Minimum body width we'll allow alongside the logo — narrower than
+/// this and the source list starts wrapping awkwardly. Sum with the
+/// logo width plus a 2-column gutter to get the threshold below which
+/// the logo is hidden entirely.
+const MIN_BODY_COLS: u16 = 44;
+
+/// Show the logo iff there's room for it next to a usable body
+/// column.
+fn should_show_logo(width: u16) -> bool {
+    width >= LOGO_COLS + MIN_BODY_COLS + 2
+}
+
 fn draw(f: &mut Frame, app: &App) {
     let size = f.area();
-    // Three sections: logo header, single-line status, scroll-friendly
-    // body that holds both the source list (with inline diagnostics)
-    // and the generated-files list. Footer pinned at the bottom.
-    //
-    // Borderless to keep vertical density high.
-    let chunks = Layout::default()
+    let show_logo = should_show_logo(size.width);
+    // The top zone is the height of the logo when the logo fits, or
+    // a single row (status only) when it doesn't.
+    let top_height = if show_logo { HEADER.len() as u16 } else { 1 };
+
+    let v = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(HEADER.len() as u16),
-            Constraint::Length(2), // status + spacer
-            Constraint::Min(0),    // body
+            Constraint::Length(top_height),
+            Constraint::Min(0),    // body continuation
             Constraint::Length(1), // footer
         ])
         .split(size);
+    let top_zone = v[0];
+    let body_continuation = v[1];
+    let footer_zone = v[2];
 
-    draw_header(f, chunks[0]);
-    draw_status(f, chunks[1], app);
-    draw_body(f, chunks[2], app);
-    draw_footer(f, chunks[3]);
+    // Status is a single line that always sits at the very top-left.
+    // The body content (sources + diagnostics + outputs) starts on the
+    // line below the status; whatever doesn't fit beside the logo
+    // overflows into the body-continuation zone.
+    let status_line = build_status_line(app);
+    let body_lines = build_body_lines(app);
+
+    if show_logo {
+        // Horizontal split: body lives on the left, the logo floats on
+        // the right with a one-cell gutter.
+        let h = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(1), // gutter
+                Constraint::Length(LOGO_COLS),
+            ])
+            .split(top_zone);
+        let left = h[0];
+        let logo_area = h[2];
+
+        // Inside the left column: row 0 is status, rows 1.. are the
+        // first chunk of body lines.
+        let lv = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(left);
+        let status_area = lv[0];
+        let top_body_area = lv[1];
+
+        f.render_widget(Paragraph::new(status_line), status_area);
+
+        let top_body_height = top_body_area.height as usize;
+        let (top_chunk, rest_chunk): (Vec<Line>, Vec<Line>) = if body_lines.len() > top_body_height
+        {
+            (
+                body_lines[..top_body_height].to_vec(),
+                body_lines[top_body_height..].to_vec(),
+            )
+        } else {
+            (body_lines.clone(), Vec::new())
+        };
+        f.render_widget(Paragraph::new(top_chunk), top_body_area);
+        f.render_widget(Paragraph::new(rest_chunk), body_continuation);
+
+        f.render_widget(logo_paragraph(), logo_area);
+    } else {
+        // Narrow terminal: skip the logo entirely. Status on top, body
+        // fills the rest.
+        f.render_widget(Paragraph::new(status_line), top_zone);
+        f.render_widget(Paragraph::new(body_lines), body_continuation);
+    }
+
+    draw_footer(f, footer_zone);
 }
 
-fn draw_header(f: &mut Frame, area: Rect) {
+fn logo_paragraph() -> Paragraph<'static> {
     let style = Style::default()
         .fg(Color::Magenta)
         .add_modifier(Modifier::BOLD);
@@ -211,10 +279,10 @@ fn draw_header(f: &mut Frame, area: Rect) {
         .iter()
         .map(|line| Line::from(Span::styled(*line, style)))
         .collect();
-    f.render_widget(Paragraph::new(lines), area);
+    Paragraph::new(lines)
 }
 
-fn draw_status(f: &mut Frame, area: Rect, app: &App) {
+fn build_status_line(app: &App) -> Line<'static> {
     let dim = Style::default().fg(Color::DarkGray);
     let mut spans = vec![
         Span::styled("watching ", dim),
@@ -273,63 +341,63 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     } else {
         spans.push(Span::styled("—", dim));
     }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    Line::from(spans)
 }
 
-fn draw_body(f: &mut Frame, area: Rect, app: &App) {
+fn build_body_lines(app: &App) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
     let dim = Style::default().fg(Color::DarkGray);
 
-    if let Some(last) = &app.last {
-        // SOURCES ─ bucketed by severity (errors first), each .prim file
-        // gets a dot prefix and any of its diagnostics nested below.
-        let buckets = bucket_sources(&last.sources, &last.diagnostics, &app.input_dir);
-        for entry in &buckets {
-            let dot_style = match entry.status {
-                Status::Error => Style::default().fg(Color::Red),
-                Status::Warning => Style::default().fg(Color::Yellow),
-                Status::Clean => Style::default().fg(Color::Green),
-            };
-            lines.push(Line::from(vec![
-                Span::styled("● ", dot_style),
-                Span::raw(entry.display_path.clone()),
-            ]));
-            // Diagnostics are sorted error-then-warning, then by line.
-            let mut diags = entry.diagnostics.clone();
-            diags.sort_by_key(|d| {
-                let sev_rank: u8 = match d.severity {
-                    Severity::Error => 0,
-                    Severity::Warning => 1,
-                    Severity::Info => 2,
-                };
-                (sev_rank, d.line, d.column)
-            });
-            for d in diags {
-                lines.push(diag_line(d));
-            }
-        }
-
-        // OUTPUTS ─ compact list of generated file paths under a
-        // single dim heading. Skipped on a failed build (no outputs
-        // were written).
-        if !last.generated.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("outputs ({})", last.generated.len()),
-                dim,
-            )));
-            for path in &last.generated {
-                lines.push(Line::from(vec![
-                    Span::styled("→ ", dim),
-                    Span::raw(short_output_path(path)),
-                ]));
-            }
-        }
-    } else {
+    let Some(last) = &app.last else {
         lines.push(Line::from(Span::styled("(waiting for first build)", dim)));
+        return lines;
+    };
+
+    // SOURCES ─ bucketed by severity (errors first), each .prim file
+    // gets a dot prefix and any of its diagnostics nested below.
+    let buckets = bucket_sources(&last.sources, &last.diagnostics, &app.input_dir);
+    for entry in &buckets {
+        let dot_style = match entry.status {
+            Status::Error => Style::default().fg(Color::Red),
+            Status::Warning => Style::default().fg(Color::Yellow),
+            Status::Clean => Style::default().fg(Color::Green),
+        };
+        lines.push(Line::from(vec![
+            Span::styled("● ", dot_style),
+            Span::raw(entry.display_path.clone()),
+        ]));
+        // Diagnostics are sorted error-then-warning, then by line.
+        let mut diags = entry.diagnostics.clone();
+        diags.sort_by_key(|d| {
+            let sev_rank: u8 = match d.severity {
+                Severity::Error => 0,
+                Severity::Warning => 1,
+                Severity::Info => 2,
+            };
+            (sev_rank, d.line, d.column)
+        });
+        for d in diags {
+            lines.push(diag_line(d));
+        }
     }
 
-    f.render_widget(Paragraph::new(lines), area);
+    // OUTPUTS ─ compact list of generated file paths under a single
+    // dim heading. Skipped on a failed build (no outputs were written).
+    if !last.generated.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("outputs ({})", last.generated.len()),
+            dim,
+        )));
+        for path in &last.generated {
+            lines.push(Line::from(vec![
+                Span::styled("→ ", dim),
+                Span::raw(short_output_path(path)),
+            ]));
+        }
+    }
+
+    lines
 }
 
 fn draw_footer(f: &mut Frame, area: Rect) {
