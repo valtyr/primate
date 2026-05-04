@@ -2,44 +2,65 @@
 //!
 //! Parses and validates the project configuration file.
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Root configuration structure
+/// Stable URL for the JSON Schema describing `primate.toml`. Editors
+/// like taplo and Even Better TOML follow `#:schema <URL>` comments
+/// at the top of TOML files for autocompletion + validation; the
+/// schema itself is derived from the [`Config`] struct in this file
+/// via the `gen-schema` bin and committed at the repo root.
+pub const SCHEMA_URL: &str =
+    "https://raw.githubusercontent.com/valtyr/primate/main/primate.schema.json";
+
+/// Root configuration structure.
 // r[impl config.file]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(title = "primate.toml", deny_unknown_fields)]
 pub struct Config {
-    /// Path to directory containing .c.toml files
+    /// Directory of `.prim` source files, relative to `primate.toml`.
+    /// primate walks this recursively; subdirectories become
+    /// `::`-separated namespaces in generated output.
     // r[impl config.input.required]
     pub input: PathBuf,
 
-    /// Optional path to sourcemap file (defaults to primate.sourcemap.json next to config)
+    /// Where the IDE sourcemap is written (defaults to
+    /// `primate.sourcemap.json` next to this config). The LSP uses
+    /// it to jump between source `.prim` lines and generated output.
     pub sourcemap: Option<PathBuf>,
 
-    /// Output configurations
+    /// One [[output]] block per generator target. At least one is
+    /// required.
     // r[impl config.output.required]
     #[serde(rename = "output")]
     pub outputs: Vec<OutputConfig>,
 }
 
-/// Configuration for a single output target
-#[derive(Debug, Deserialize)]
+/// One generator target.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct OutputConfig {
-    /// Built-in generator name
+    /// Built-in generator name. Exactly one of `generator` or
+    /// `plugin` must be set.
     // r[impl config.generator.builtin]
     pub generator: Option<String>,
 
-    /// External plugin name or path
+    /// External plugin name (an executable on `PATH`, or an absolute
+    /// path). Exactly one of `generator` or `plugin` must be set.
     pub plugin: Option<String>,
 
-    /// Output file or directory path
+    /// Where the generator writes its output. A directory for
+    /// `typescript` and `python`; a single `.rs` file for `rust`.
     // r[impl config.output.path]
     pub path: PathBuf,
 
-    /// Generator-specific options
+    /// Generator-specific knobs. The accepted keys depend on the
+    /// generator — see the per-generator section in the build docs.
     // r[impl config.output.options]
     #[serde(default)]
+    #[schemars(with = "std::collections::HashMap<String, serde_json::Value>")]
     pub options: HashMap<String, toml::Value>,
 }
 
@@ -205,6 +226,34 @@ fn find_output_line(content: &str, index: usize) -> Option<u32> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    /// Belt-and-braces: if anyone changes the `Config` struct
+    /// without re-running `cargo run --bin gen-schema`, the
+    /// committed schema and the runtime-generated schema will
+    /// disagree and this test will fail loudly. CI runs the bin
+    /// itself and `git diff --exit-code`s; this test is what
+    /// developers see locally.
+    #[test]
+    fn committed_schema_matches_generated() {
+        let generated = schemars::schema_for!(Config);
+        let mut generated_json = serde_json::to_string_pretty(&generated).unwrap();
+        generated_json.push('\n');
+
+        let committed =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/primate.schema.json"))
+                .expect("primate.schema.json missing — run `cargo run --bin gen-schema`");
+
+        assert_eq!(
+            committed.trim_end(),
+            generated_json.trim_end(),
+            "primate.schema.json is stale — run `cargo run --bin gen-schema` and commit"
+        );
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
