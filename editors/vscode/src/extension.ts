@@ -70,14 +70,16 @@ export function activate(context: ExtensionContext) {
   };
 
   const clientOptions: LanguageClientOptions = {
-    // Activate for the `primate` language (registered in package.json's
-    // `contributes.languages`). The synchronize block also forwards
-    // primate.toml changes so the LSP can re-resolve namespaces when
-    // the project's input directory changes.
-    documentSelector: [
-      { scheme: "file", language: "primate" },
-      { scheme: "file", pattern: "**/primate.toml" },
-    ],
+    // Only activate for primate-language documents (registered in
+    // package.json's `contributes.languages`). primate.toml is a
+    // regular TOML file served by whichever TOML LSP the user has —
+    // we previously selected it here too, which caused VS Code to
+    // ask `primate lsp` for completions inside primate.toml and
+    // get back primate-DSL suggestions. Watching the file via
+    // `synchronize.fileEvents` is enough to let the server notice
+    // input-directory changes; it doesn't need to handle requests
+    // for the file.
+    documentSelector: [{ scheme: "file", language: "primate" }],
     synchronize: {
       fileEvents: [
         workspace.createFileSystemWatcher("**/*.prim"),
