@@ -2,6 +2,8 @@
 //!
 //! Implements command-line argument parsing and command dispatch.
 
+mod watch_tui;
+
 use crate::config::Config;
 use crate::diagnostics::{Diagnostics, Severity};
 use crate::generators::Generator;
@@ -82,6 +84,46 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
+
+    /// Write a primate skill file for AI coding agents (a terse cheat-sheet
+    /// covering syntax, setup, the always-fmt-after-edits rule, and common
+    /// patterns).
+    ///
+    /// Two output formats are supported:
+    ///
+    /// - **agents** (default): plain Markdown, written to `AGENTS.md` at the
+    ///   project root. This is the `agents.md` open standard and is read by
+    ///   Claude Code, Cursor, GitHub Copilot, Codex, Aider, Devin, and most
+    ///   other coding agents. Many tools that read other formats (e.g.
+    ///   Cursor's `.cursor/rules/`, GitHub's `.github/copilot-instructions.md`)
+    ///   also consume the same Markdown — point `--output` at the right path.
+    ///
+    /// - **claude**: Claude Code's structured skill format with YAML
+    ///   frontmatter, written to `.claude/skills/primate/SKILL.md`. The
+    ///   frontmatter lets Claude auto-load the skill when it sees `.prim`
+    ///   files or primate-related questions.
+    Skill {
+        /// Output format. `agents` (the default) writes plain Markdown to
+        /// `AGENTS.md`. `claude` writes a Claude Code skill with YAML
+        /// frontmatter to `.claude/skills/primate/SKILL.md`.
+        #[arg(long, default_value = "agents", value_parser = ["agents", "claude"])]
+        target: String,
+
+        /// Override the destination path. The content is determined by
+        /// `--target`; this just changes where it's written. Useful for
+        /// agents that read other paths (e.g. `.cursor/rules/primate.md`,
+        /// `.github/copilot-instructions.md`).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Print to stdout instead of writing a file.
+        #[arg(long)]
+        stdout: bool,
+
+        /// Overwrite the destination if it already exists.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -111,6 +153,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Fmt { paths, check }) => {
             run_fmt(&cli.config, paths, check)?;
+        }
+        Some(Command::Skill {
+            target,
+            output,
+            stdout,
+            force,
+        }) => {
+            run_skill(&target, output, stdout, force)?;
         }
         None => {
             // r[impl cli.default-config]
@@ -403,35 +453,65 @@ fn run_generate_watch(
     config_path: &PathBuf,
     input_override: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load(config_path)?;
-    let input_dir = input_override.as_ref().unwrap_or(&config.input).clone();
+    watch_tui::run(config_path.clone(), input_override)
+}
 
-    // Initial generate
-    eprintln!("Watching {} for changes...", input_dir.display());
-    let _ = run_generate(config_path, input_override.clone(), None);
+fn run_skill(
+    target: &str,
+    output: Option<PathBuf>,
+    stdout: bool,
+    force: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // The skill body is the same plain-Markdown text in both modes; the
+    // `claude` target just prepends YAML frontmatter so Claude Code can
+    // auto-invoke it. Keeping one source of truth avoids drift.
+    const BODY: &str = include_str!("./skill.md");
 
-    // Set up file watcher
-    let (tx, rx) = channel();
-    let mut debouncer = new_debouncer(Duration::from_millis(500), tx)?;
+    let (default_path, content) = match target {
+        "claude" => (
+            PathBuf::from(".claude/skills/primate/SKILL.md"),
+            // YAML frontmatter for Claude Code skills. `description`
+            // determines when Claude loads the skill automatically;
+            // primate-flavored keywords up front so it surfaces on
+            // anything `.prim`/`primate.toml`-related.
+            format!(
+                "---\n\
+                 name: primate\n\
+                 description: Use when working with primate — a DSL that generates typed constants for Rust, TypeScript, and Python from one source. Triggers on `.prim` files, `primate.toml`, or questions about the `primate` CLI. Covers setup, syntax, unit suffixes, enums, namespaces, and the always-fmt-after-edits rule.\n\
+                 ---\n\n{}",
+                BODY,
+            ),
+        ),
+        // Default `agents` target: plain markdown for AGENTS.md. The
+        // agents.md open standard is read by 60+ AI coding tools.
+        _ => (PathBuf::from("AGENTS.md"), BODY.to_string()),
+    };
 
-    debouncer
-        .watcher()
-        .watch(&input_dir, RecursiveMode::Recursive)?;
-
-    loop {
-        match rx.recv() {
-            Ok(Ok(_events)) => {
-                eprintln!("\n--- File changed, regenerating ---\n");
-                let _ = run_generate(config_path, input_override.clone(), None);
-            }
-            Ok(Err(e)) => eprintln!("Watch error: {:?}", e),
-            Err(e) => {
-                eprintln!("Channel error: {:?}", e);
-                break;
-            }
-        }
+    if stdout {
+        print!("{}", content);
+        return Ok(());
     }
 
+    let dest = output.unwrap_or(default_path);
+
+    if dest.exists() && !force {
+        return Err(format!(
+            "{} already exists. Pass --force to overwrite, --output to write \
+             elsewhere, or --stdout to inspect the contents first.",
+            dest.display()
+        )
+        .into());
+    }
+
+    if let Some(parent) = dest.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("creating directory {}: {}", parent.display(), e))?;
+        }
+    }
+    std::fs::write(&dest, content)
+        .map_err(|e| format!("writing skill to {}: {}", dest.display(), e))?;
+    eprintln!("Wrote primate skill ({}) to {}", target, dest.display());
     Ok(())
 }
 
@@ -592,7 +672,7 @@ fn print_diagnostics(diagnostics: &Diagnostics) {
     }
 }
 
-fn toml_to_json(value: &toml::Value) -> serde_json::Value {
+pub(crate) fn toml_to_json(value: &toml::Value) -> serde_json::Value {
     match value {
         toml::Value::String(s) => serde_json::Value::String(s.clone()),
         toml::Value::Integer(i) => serde_json::Value::Number((*i).into()),
