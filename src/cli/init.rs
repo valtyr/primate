@@ -8,6 +8,7 @@
 
 use inquire::autocompletion::{Autocomplete, Replacement};
 use inquire::ui::{Color, RenderConfig, StyleSheet, Styled};
+use inquire::validator::ValueRequiredValidator;
 use inquire::{Confirm, CustomUserError, MultiSelect, Text};
 use std::path::{Path, PathBuf};
 
@@ -50,11 +51,24 @@ impl BuiltinTarget {
             BuiltinTarget::Python => "Python",
         }
     }
-    fn default_path(self) -> &'static str {
+    /// One-line help message for the path prompt, including an
+    /// example. Examples aren't defaults — they show shape, not the
+    /// expected answer, since "the right" generated-output path is
+    /// project-specific.
+    fn path_help(self) -> &'static str {
         match self {
-            BuiltinTarget::TypeScript => "web/src/generated/constants/",
-            BuiltinTarget::Rust => "src/generated/constants.rs",
-            BuiltinTarget::Python => "python/generated/constants/",
+            BuiltinTarget::TypeScript => {
+                "A directory; primate writes one .ts per namespace plus an index.ts. \
+                 e.g. web/src/generated/constants/"
+            }
+            BuiltinTarget::Rust => {
+                "A single .rs file with one `pub mod` block per namespace. \
+                 e.g. src/generated/constants.rs"
+            }
+            BuiltinTarget::Python => {
+                "A directory; one .py per namespace plus an __init__.py. \
+                 e.g. python/generated/constants/"
+            }
         }
     }
 }
@@ -144,9 +158,11 @@ fn install_render_config() {
 
 fn prompt() -> Result<Answers, Box<dyn std::error::Error>> {
     let input_dir = Text::new("Where do your .prim source files live?")
-        .with_default("constants")
-        .with_help_message("Press → to accept the suggested directory")
+        .with_help_message(
+            "A directory under the project root, e.g. constants/ or shared/constants/.",
+        )
         .with_autocomplete(PathAutocomplete::new())
+        .with_validator(ValueRequiredValidator::default())
         .prompt()?;
     note_will_be_created(&input_dir, PathRole::Input);
 
@@ -182,15 +198,20 @@ fn prompt() -> Result<Answers, Box<dyn std::error::Error>> {
     if want_plugin {
         loop {
             let name = Text::new("Plugin name")
-                .with_help_message("Shows up in primate.toml — e.g. lua, kotlin, csharp")
+                .with_help_message("Shows up in primate.toml — e.g. lua, kotlin, csharp.")
+                .with_validator(ValueRequiredValidator::default())
                 .prompt()?;
             let command = Text::new("Command")
-                .with_help_message("Executable on PATH, or an absolute path")
+                .with_help_message("Executable on PATH, or an absolute path.")
                 .with_autocomplete(PathAutocomplete::new())
+                .with_validator(ValueRequiredValidator::default())
                 .prompt()?;
             let path = Text::new("Where should it write its output?")
+                .with_help_message("File or directory — your plugin decides.")
                 .with_autocomplete(PathAutocomplete::new())
+                .with_validator(ValueRequiredValidator::default())
                 .prompt()?;
+            note_will_be_created(&path, PathRole::Output);
             plugins.push(PluginChoice {
                 name,
                 command,
@@ -219,9 +240,9 @@ fn prompt() -> Result<Answers, Box<dyn std::error::Error>> {
 /// write output.
 fn configure_target(target: BuiltinTarget) -> Result<BuiltinChoice, Box<dyn std::error::Error>> {
     let path = Text::new(&format!("Where should the {} output go?", target.pretty()))
-        .with_default(target.default_path())
-        .with_help_message(target_path_help(target))
+        .with_help_message(target.path_help())
         .with_autocomplete(PathAutocomplete::new())
+        .with_validator(ValueRequiredValidator::default())
         .prompt()?;
     note_will_be_created(&path, PathRole::Output);
 
@@ -251,18 +272,6 @@ fn note_will_be_created(path: &str, role: PathRole) {
     // Indent so the hint hangs under the prompt's value column;
     // dark-grey so it reads as secondary.
     eprintln!("\x1b[90m  {}\x1b[0m", msg);
-}
-
-fn target_path_help(target: BuiltinTarget) -> &'static str {
-    match target {
-        BuiltinTarget::TypeScript => {
-            "A directory; primate writes one .ts per namespace plus an index.ts."
-        }
-        BuiltinTarget::Rust => "A single .rs file with one `pub mod` block per namespace.",
-        BuiltinTarget::Python => {
-            "A directory; primate writes one .py per namespace plus an __init__.py."
-        }
-    }
 }
 
 // ────────────────────────────────────────────────────────────────────
