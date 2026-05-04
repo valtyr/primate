@@ -1,9 +1,10 @@
 //! Watch-mode TUI.
 //!
 //! A small ratatui app that watches the input directory, re-runs the
-//! generator on changes, and displays the most recent build's status,
-//! generated files, and diagnostics. Intended for `primate generate
-//! --watch` only — every other command stays plain text.
+//! generator on changes, and displays the most recent build's status
+//! source-file by source-file, with each file's diagnostics nested
+//! beneath it. Intended for `primate generate --watch` only — every
+//! other command stays plain text.
 
 use crate::config::Config;
 use crate::diagnostics::{Diagnostic as PrimateDiagnostic, Severity};
@@ -12,7 +13,7 @@ use crate::generators::python::PythonGenerator;
 use crate::generators::rust::RustGenerator;
 use crate::generators::typescript::TypeScriptGenerator;
 use crate::ir::{CodeGenRequest, GeneratedFile};
-use crate::parser::{discover_files, parse_project};
+use crate::parser::{ConstFile, discover_files, parse_project};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -20,10 +21,10 @@ use crossterm::terminal::{
 };
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::Paragraph;
 use ratatui::{Frame, Terminal};
 use std::collections::HashMap;
 use std::io::{self, Stdout};
@@ -31,9 +32,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
-/// The ASCII banner — six rows of braille glyphs depicting the primate
-/// mark. Width is fixed at 34 columns; the TUI hides the whole header
-/// pane when the terminal is narrower than that.
+/// The ASCII banner rendered at the top in ANSI Magenta + bold so it
+/// reads on both light and dark terminals.
 const HEADER: &[&str] = &[
     "⠀⠀⠀⠀⣠⣶⣿⣿⣷⣦⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
     "⠀⠀⣴⣶⣿⠋⣉⠉⣁⠙⣿⣿⡇⠀⠀⠀⠀⠀⢀⣀⣀⣀⣀⡀⠀⠀⠀⢀⣀⣀⣀⠀⠀⠀",
@@ -49,33 +49,27 @@ const HEADER: &[&str] = &[
 /// after every build completes.
 #[derive(Default, Clone)]
 struct BuildSnapshot {
-    /// Wall-clock duration of the build (parse + lower + generate + write).
     duration: Duration,
+    /// Every `.prim` file discovered under `input` at build time, in
+    /// no particular order. The TUI sorts and buckets these by status.
+    sources: Vec<PathBuf>,
     /// Generated file paths, in the order the generators emitted them.
     generated: Vec<String>,
-    /// All diagnostics from the parse/lower phases. Errors gate the
-    /// `success` flag; warnings flow through unchanged.
+    /// All diagnostics from the parse/lower phases.
     diagnostics: Vec<PrimateDiagnostic>,
-    /// True iff there were no error-severity diagnostics. A build with
-    /// warnings is still successful.
+    /// Iff there are no error-severity diagnostics. Warnings still
+    /// count as success.
     success: bool,
-    /// When the build finished. Used for the "x ago" footer text.
-    finished_at: Option<Instant>,
 }
 
 /// All state the TUI renders against.
 struct App {
     config_path: PathBuf,
     input_dir: PathBuf,
-    /// `None` until the first build completes.
     last: Option<BuildSnapshot>,
-    /// True while a build is running. Drives the "rebuilding…" indicator.
     building: bool,
-    /// Used to animate the spinner without holding a separate timer.
     spinner_phase: usize,
-    /// Set when the user requests an explicit rebuild via `r`. The main
-    /// loop catches this and runs a build before going back to the file
-    /// watcher.
+    /// Set when the user requests an explicit rebuild via `r`.
     pending_rebuild: bool,
 }
 
@@ -127,9 +121,8 @@ fn run_loop(
     loop {
         terminal.draw(|f| draw(f, app))?;
 
-        // Coalesce file events that arrive while we're blocked: if the
-        // watcher channel produces anything, drain it before triggering a
-        // build, so a burst of saves becomes a single rebuild.
+        // Coalesce file events: drain the channel before triggering a
+        // build, so a burst of saves becomes one rebuild.
         let mut should_build = app.pending_rebuild;
         app.pending_rebuild = false;
         match rx.try_recv() {
@@ -183,38 +176,34 @@ fn restore_terminal(
     Ok(())
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Rendering
+// ────────────────────────────────────────────────────────────────────
+
 fn draw(f: &mut Frame, app: &App) {
     let size = f.area();
-
-    // The header is a fixed 8 rows tall. Width-wise we can render it on
-    // any terminal — the glyphs degrade fine at narrow widths, and we
-    // pad inside the block. We allocate `header_height + 2` for the
-    // bordered block.
-    let header_height = HEADER.len() as u16 + 2;
+    // Three sections: logo header, single-line status, scroll-friendly
+    // body that holds both the source list (with inline diagnostics)
+    // and the generated-files list. Footer pinned at the bottom.
+    //
+    // Borderless to keep vertical density high.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(header_height),
-            Constraint::Length(3), // status line
-            Constraint::Min(5),    // generated files
-            Constraint::Min(3),    // diagnostics
+            Constraint::Length(HEADER.len() as u16),
+            Constraint::Length(2), // status + spacer
+            Constraint::Min(0),    // body
             Constraint::Length(1), // footer
         ])
         .split(size);
 
     draw_header(f, chunks[0]);
     draw_status(f, chunks[1], app);
-    draw_generated(f, chunks[2], app);
-    draw_diagnostics(f, chunks[3], app);
-    draw_footer(f, chunks[4], app);
+    draw_body(f, chunks[2], app);
+    draw_footer(f, chunks[3]);
 }
 
-fn draw_header(f: &mut Frame, area: ratatui::layout::Rect) {
-    // Use ANSI `Magenta` + bold rather than the literal brand purple
-    // (#3027D4) from the logo: each terminal themes the named ANSI
-    // colors to fit its own foreground/background, so the header reads
-    // legibly on both light and dark color schemes. The fixed RGB had
-    // poor contrast (~3.5:1) on dark terminals.
+fn draw_header(f: &mut Frame, area: Rect) {
     let style = Style::default()
         .fg(Color::Magenta)
         .add_modifier(Modifier::BOLD);
@@ -222,27 +211,23 @@ fn draw_header(f: &mut Frame, area: ratatui::layout::Rect) {
         .iter()
         .map(|line| Line::from(Span::styled(*line, style)))
         .collect();
-    let block = Block::default().borders(Borders::BOTTOM);
-    let para = Paragraph::new(lines).block(block);
-    f.render_widget(para, area);
+    f.render_widget(Paragraph::new(lines), area);
 }
 
-fn draw_status(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let mut spans: Vec<Span> = Vec::new();
-    spans.push(Span::styled(
-        "watching ",
-        Style::default().fg(Color::DarkGray),
-    ));
-    spans.push(Span::styled(
-        app.input_dir.display().to_string(),
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
-    spans.push(Span::raw("   "));
+fn draw_status(f: &mut Frame, area: Rect, app: &App) {
+    let dim = Style::default().fg(Color::DarkGray);
+    let mut spans = vec![
+        Span::styled("watching ", dim),
+        Span::styled(
+            app.input_dir.display().to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   "),
+    ];
 
     if app.building {
-        let glyph = SPINNER[app.spinner_phase];
         spans.push(Span::styled(
-            format!("{} rebuilding…", glyph),
+            format!("{} rebuilding…", SPINNER[app.spinner_phase]),
             Style::default().fg(Color::Yellow),
         ));
     } else if let Some(last) = &app.last {
@@ -251,106 +236,263 @@ fn draw_status(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
         } else {
             ("✗", Color::Red)
         };
-        let summary = if last.success {
+        spans.push(Span::styled(
+            format!("{} {}", glyph, fmt_duration(last.duration)),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ));
+
+        let (errors, warnings) = count_severities(&last.diagnostics);
+        if errors > 0 {
+            spans.push(Span::styled(
+                format!(
+                    " · {} {}",
+                    errors,
+                    if errors == 1 { "error" } else { "errors" }
+                ),
+                Style::default().fg(Color::Red),
+            ));
+        }
+        if warnings > 0 {
+            spans.push(Span::styled(
+                format!(
+                    " · {} {}",
+                    warnings,
+                    if warnings == 1 { "warning" } else { "warnings" }
+                ),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+        spans.push(Span::styled(
             format!(
-                "{} {} files in {}",
-                glyph,
-                last.generated.len(),
-                fmt_duration(last.duration),
-            )
-        } else {
-            let n = last
-                .diagnostics
-                .iter()
-                .filter(|d| matches!(d.severity, Severity::Error))
-                .count();
-            format!(
-                "{} build failed ({} {})",
-                glyph,
-                n,
-                if n == 1 { "error" } else { "errors" }
-            )
-        };
-        spans.push(Span::styled(summary, Style::default().fg(color)));
+                " · {} src · {} out",
+                last.sources.len(),
+                last.generated.len()
+            ),
+            dim,
+        ));
     } else {
-        spans.push(Span::styled("—", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled("—", dim));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn draw_body(f: &mut Frame, area: Rect, app: &App) {
+    let mut lines: Vec<Line> = Vec::new();
+    let dim = Style::default().fg(Color::DarkGray);
+
+    if let Some(last) = &app.last {
+        // SOURCES ─ bucketed by severity (errors first), each .prim file
+        // gets a dot prefix and any of its diagnostics nested below.
+        let buckets = bucket_sources(&last.sources, &last.diagnostics, &app.input_dir);
+        for entry in &buckets {
+            let dot_style = match entry.status {
+                Status::Error => Style::default().fg(Color::Red),
+                Status::Warning => Style::default().fg(Color::Yellow),
+                Status::Clean => Style::default().fg(Color::Green),
+            };
+            lines.push(Line::from(vec![
+                Span::styled("● ", dot_style),
+                Span::raw(entry.display_path.clone()),
+            ]));
+            // Diagnostics are sorted error-then-warning, then by line.
+            let mut diags = entry.diagnostics.clone();
+            diags.sort_by_key(|d| {
+                let sev_rank: u8 = match d.severity {
+                    Severity::Error => 0,
+                    Severity::Warning => 1,
+                    Severity::Info => 2,
+                };
+                (sev_rank, d.line, d.column)
+            });
+            for d in diags {
+                lines.push(diag_line(d));
+            }
+        }
+
+        // OUTPUTS ─ compact list of generated file paths under a
+        // single dim heading. Skipped on a failed build (no outputs
+        // were written).
+        if !last.generated.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("outputs ({})", last.generated.len()),
+                dim,
+            )));
+            for path in &last.generated {
+                lines.push(Line::from(vec![
+                    Span::styled("→ ", dim),
+                    Span::raw(short_output_path(path)),
+                ]));
+            }
+        }
+    } else {
+        lines.push(Line::from(Span::styled("(waiting for first build)", dim)));
     }
 
-    let para = Paragraph::new(Line::from(spans))
-        .block(Block::default().borders(Borders::BOTTOM))
-        .wrap(Wrap { trim: true });
-    f.render_widget(para, area);
+    f.render_widget(Paragraph::new(lines), area);
 }
 
-fn draw_generated(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let items: Vec<ListItem> = match &app.last {
-        Some(last) if !last.generated.is_empty() => last
-            .generated
-            .iter()
-            .map(|p| {
-                ListItem::new(Line::from(vec![
-                    Span::styled("→ ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(p.clone()),
-                ]))
-            })
-            .collect(),
-        Some(_) => vec![ListItem::new(Span::styled(
-            "(no files generated)",
-            Style::default().fg(Color::DarkGray),
-        ))],
-        None => vec![ListItem::new(Span::styled(
-            "(waiting for first build)",
-            Style::default().fg(Color::DarkGray),
-        ))],
-    };
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" generated "));
-    f.render_widget(list, area);
-}
-
-fn draw_diagnostics(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let items: Vec<ListItem> = match &app.last {
-        Some(last) if !last.diagnostics.is_empty() => last
-            .diagnostics
-            .iter()
-            .map(|d| {
-                let (sev, color) = match d.severity {
-                    Severity::Error => ("error", Color::Red),
-                    Severity::Warning => ("warn ", Color::Yellow),
-                    Severity::Info => ("info ", Color::Cyan),
-                };
-                ListItem::new(Line::from(vec![
-                    Span::styled(sev, Style::default().fg(color)),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!("{}:{}", d.file, d.line),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                    Span::raw("  "),
-                    Span::raw(d.message.clone()),
-                ]))
-            })
-            .collect(),
-        _ => vec![ListItem::new(Span::styled(
-            "(no diagnostics)",
-            Style::default().fg(Color::DarkGray),
-        ))],
-    };
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" diagnostics "),
-    );
-    f.render_widget(list, area);
-}
-
-fn draw_footer(f: &mut Frame, area: ratatui::layout::Rect, _app: &App) {
+fn draw_footer(f: &mut Frame, area: Rect) {
+    let dim = Style::default().fg(Color::DarkGray);
+    let key = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Gray)
+        .add_modifier(Modifier::BOLD);
     let footer = Line::from(vec![
-        Span::styled(" q ", Style::default().fg(Color::Black).bg(Color::Gray)),
-        Span::raw(" quit   "),
-        Span::styled(" r ", Style::default().fg(Color::Black).bg(Color::Gray)),
-        Span::raw(" rebuild"),
+        Span::styled(" q ", key),
+        Span::styled(" quit", dim),
+        Span::styled("   ", dim),
+        Span::styled(" r ", key),
+        Span::styled(" rebuild", dim),
     ]);
     f.render_widget(Paragraph::new(footer), area);
+}
+
+fn diag_line(d: &PrimateDiagnostic) -> Line<'static> {
+    let (glyph, color) = match d.severity {
+        Severity::Error => ("✘", Color::Red),
+        Severity::Warning => ("⚠", Color::Yellow),
+        Severity::Info => ("ℹ", Color::Cyan),
+    };
+    let dim = Style::default().fg(Color::DarkGray);
+    Line::from(vec![
+        Span::raw("    "),
+        Span::styled(glyph.to_string(), Style::default().fg(color)),
+        Span::raw(" "),
+        Span::styled(format!("L{}:{}", d.line, d.column), dim),
+        Span::raw("  "),
+        Span::styled(
+            d.code.clone(),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::raw(d.message.clone()),
+    ])
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Bucketing & path helpers
+// ────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq)]
+enum Status {
+    Error,
+    Warning,
+    Clean,
+}
+
+#[derive(Clone)]
+struct SourceEntry<'a> {
+    /// The displayed name for the file — relative to the input dir
+    /// when possible, falling back to the file name only.
+    display_path: String,
+    status: Status,
+    diagnostics: Vec<&'a PrimateDiagnostic>,
+}
+
+/// Group every diagnostic with its owning `.prim` file, classify each
+/// file by worst severity, and sort: errors first, warnings second,
+/// clean last; alphabetical by display path within each bucket.
+fn bucket_sources<'a>(
+    sources: &[PathBuf],
+    diagnostics: &'a [PrimateDiagnostic],
+    input_dir: &Path,
+) -> Vec<SourceEntry<'a>> {
+    // Match diagnostics to source files via canonical paths; fall
+    // back to the literal `file` field on the diagnostic if a match
+    // fails (e.g. a config-error pointing at primate.toml).
+    let mut by_path: HashMap<PathBuf, Vec<&PrimateDiagnostic>> = HashMap::new();
+    for d in diagnostics {
+        let p = PathBuf::from(&d.file);
+        let canon = std::fs::canonicalize(&p).unwrap_or(p);
+        by_path.entry(canon).or_default().push(d);
+    }
+
+    // Build the entry for every known source. Sources without
+    // diagnostics still render (as green dots).
+    let mut entries: Vec<SourceEntry<'a>> = Vec::with_capacity(sources.len());
+    for source in sources {
+        let canon = std::fs::canonicalize(source).unwrap_or_else(|_| source.clone());
+        let diags = by_path.remove(&canon).unwrap_or_default();
+        let status = classify(&diags);
+        entries.push(SourceEntry {
+            display_path: short_source_path(source, input_dir),
+            status,
+            diagnostics: diags,
+        });
+    }
+
+    // Any leftover diagnostics (whose `file` didn't match a known
+    // source) become their own entries — typically primate.toml or
+    // similar.
+    for (path, diags) in by_path.into_iter() {
+        let status = classify(&diags);
+        entries.push(SourceEntry {
+            display_path: short_source_path(&path, input_dir),
+            status,
+            diagnostics: diags,
+        });
+    }
+
+    entries.sort_by(|a, b| {
+        let rank = |s: Status| match s {
+            Status::Error => 0,
+            Status::Warning => 1,
+            Status::Clean => 2,
+        };
+        rank(a.status)
+            .cmp(&rank(b.status))
+            .then(a.display_path.cmp(&b.display_path))
+    });
+    entries
+}
+
+fn classify(diags: &[&PrimateDiagnostic]) -> Status {
+    if diags.iter().any(|d| matches!(d.severity, Severity::Error)) {
+        Status::Error
+    } else if diags
+        .iter()
+        .any(|d| matches!(d.severity, Severity::Warning))
+    {
+        Status::Warning
+    } else {
+        Status::Clean
+    }
+}
+
+fn count_severities(diags: &[PrimateDiagnostic]) -> (usize, usize) {
+    let mut errors = 0;
+    let mut warnings = 0;
+    for d in diags {
+        match d.severity {
+            Severity::Error => errors += 1,
+            Severity::Warning => warnings += 1,
+            Severity::Info => {}
+        }
+    }
+    (errors, warnings)
+}
+
+/// Strip the input-directory prefix so `examples/constants/limits.prim`
+/// renders as just `limits.prim`. Falls back to the file name if the
+/// path isn't under `input_dir`.
+fn short_source_path(path: &Path, input_dir: &Path) -> String {
+    if let (Ok(canon), Ok(input_canon)) = (
+        std::fs::canonicalize(path),
+        std::fs::canonicalize(input_dir),
+    ) && let Ok(rel) = canon.strip_prefix(&input_canon)
+    {
+        return rel.display().to_string();
+    }
+    path.file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+/// Strip a leading `./` from generated paths when present; everything
+/// else stays as-is. Output paths are usually short enough to fit.
+fn short_output_path(path: &str) -> String {
+    path.strip_prefix("./").unwrap_or(path).to_string()
 }
 
 fn fmt_duration(d: Duration) -> String {
@@ -362,10 +504,10 @@ fn fmt_duration(d: Duration) -> String {
     }
 }
 
-/// Run a complete build (parse → lower → all generators → fs::write) and
-/// return a snapshot describing the result. Mirrors `run_generate` in
-/// the non-TUI CLI but captures the outputs in memory so the TUI can
-/// render them.
+// ────────────────────────────────────────────────────────────────────
+// Build pipeline (mirrors run_generate but captures outputs in memory)
+// ────────────────────────────────────────────────────────────────────
+
 fn do_build(config_path: &Path) -> BuildSnapshot {
     let started = Instant::now();
     let mut snap = BuildSnapshot::default();
@@ -373,19 +515,11 @@ fn do_build(config_path: &Path) -> BuildSnapshot {
     let config = match Config::load(config_path) {
         Ok(c) => c,
         Err(e) => {
-            snap.diagnostics.push(PrimateDiagnostic {
-                file: config_path.display().to_string(),
-                line: 1,
-                column: 1,
-                length: None,
-                severity: Severity::Error,
-                code: "config-error".to_string(),
-                message: format!("loading config: {}", e),
-                targets: vec![],
-            });
-            snap.success = false;
+            snap.diagnostics.push(synthetic_error(
+                config_path,
+                format!("loading config: {}", e),
+            ));
             snap.duration = started.elapsed();
-            snap.finished_at = Some(Instant::now());
             return snap;
         }
     };
@@ -393,31 +527,23 @@ fn do_build(config_path: &Path) -> BuildSnapshot {
     let files = match discover_files(&config.input) {
         Ok(f) => f,
         Err(e) => {
-            snap.diagnostics.push(PrimateDiagnostic {
-                file: config.input.display().to_string(),
-                line: 1,
-                column: 1,
-                length: None,
-                severity: Severity::Error,
-                code: "config-error".to_string(),
-                message: format!("scanning input: {}", e),
-                targets: vec![],
-            });
-            snap.success = false;
+            snap.diagnostics.push(synthetic_error(
+                &config.input,
+                format!("scanning input: {}", e),
+            ));
             snap.duration = started.elapsed();
-            snap.finished_at = Some(Instant::now());
             return snap;
         }
     };
+
+    snap.sources = files.iter().map(|f: &ConstFile| f.path.clone()).collect();
 
     let project = parse_project(files);
     snap.diagnostics
         .extend(project.diagnostics.diagnostics.iter().cloned());
 
     if project.diagnostics.has_errors() {
-        snap.success = false;
         snap.duration = started.elapsed();
-        snap.finished_at = Some(Instant::now());
         return snap;
     }
 
@@ -434,71 +560,46 @@ fn do_build(config_path: &Path) -> BuildSnapshot {
         request.enums = project.enums.clone();
         request.aliases = project.aliases.clone();
 
-        let response_files: Vec<GeneratedFile> =
-            if let Some(generator_name) = &output_config.generator {
-                match generator_name.as_str() {
-                    "typescript" => {
-                        TypeScriptGenerator::from_options(&options)
-                            .generate(&request)
-                            .files
-                    }
-                    "rust" => {
-                        RustGenerator::from_options(&options)
-                            .generate(&request)
-                            .files
-                    }
-                    "python" => {
-                        PythonGenerator::from_options(&options)
-                            .generate(&request)
-                            .files
-                    }
-                    other => {
-                        snap.diagnostics.push(PrimateDiagnostic {
-                            file: config_path.display().to_string(),
-                            line: 1,
-                            column: 1,
-                            length: None,
-                            severity: Severity::Error,
-                            code: "config-error".to_string(),
-                            message: format!("unknown generator `{}`", other),
-                            targets: vec![],
-                        });
-                        continue;
-                    }
-                }
-            } else {
+        let response_files: Vec<GeneratedFile> = match output_config.generator.as_deref() {
+            Some("typescript") => {
+                TypeScriptGenerator::from_options(&options)
+                    .generate(&request)
+                    .files
+            }
+            Some("rust") => {
+                RustGenerator::from_options(&options)
+                    .generate(&request)
+                    .files
+            }
+            Some("python") => {
+                PythonGenerator::from_options(&options)
+                    .generate(&request)
+                    .files
+            }
+            Some(other) => {
+                snap.diagnostics.push(synthetic_error(
+                    config_path,
+                    format!("unknown generator `{}`", other),
+                ));
                 continue;
-            };
+            }
+            None => continue,
+        };
 
         for file in response_files {
-            if let Some(parent) = Path::new(&file.path).parent() {
-                if !parent.as_os_str().is_empty() {
-                    if let Err(e) = std::fs::create_dir_all(parent) {
-                        snap.diagnostics.push(PrimateDiagnostic {
-                            file: parent.display().to_string(),
-                            line: 1,
-                            column: 1,
-                            length: None,
-                            severity: Severity::Error,
-                            code: "io-error".to_string(),
-                            message: format!("creating dir: {}", e),
-                            targets: vec![],
-                        });
-                        continue;
-                    }
-                }
+            if let Some(parent) = Path::new(&file.path).parent()
+                && !parent.as_os_str().is_empty()
+                && let Err(e) = std::fs::create_dir_all(parent)
+            {
+                snap.diagnostics
+                    .push(synthetic_error(parent, format!("creating dir: {}", e)));
+                continue;
             }
             if let Err(e) = std::fs::write(&file.path, &file.content) {
-                snap.diagnostics.push(PrimateDiagnostic {
-                    file: file.path.clone(),
-                    line: 1,
-                    column: 1,
-                    length: None,
-                    severity: Severity::Error,
-                    code: "io-error".to_string(),
-                    message: format!("writing file: {}", e),
-                    targets: vec![],
-                });
+                snap.diagnostics.push(synthetic_error(
+                    Path::new(&file.path),
+                    format!("writing file: {}", e),
+                ));
                 continue;
             }
             snap.generated.push(file.path);
@@ -510,6 +611,18 @@ fn do_build(config_path: &Path) -> BuildSnapshot {
         .iter()
         .any(|d| matches!(d.severity, Severity::Error));
     snap.duration = started.elapsed();
-    snap.finished_at = Some(Instant::now());
     snap
+}
+
+fn synthetic_error(path: &Path, message: String) -> PrimateDiagnostic {
+    PrimateDiagnostic {
+        file: path.display().to_string(),
+        line: 1,
+        column: 1,
+        length: None,
+        severity: Severity::Error,
+        code: "io-error".to_string(),
+        message,
+        targets: vec![],
+    }
 }
