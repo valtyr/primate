@@ -31,6 +31,21 @@ my-app/
 
 ## A minimal config
 
+The fastest path is the wizard:
+
+```bash
+primate init
+```
+
+It walks you through the source directory, which target languages to
+generate, the output path for each, and any external plugins. The
+resulting `primate.toml` is heavily commented and lists every option
+each picked generator accepts at its default — so you discover what's
+tunable without leaving the editor. See [`primate init`](./cli/init.md)
+for the full flow.
+
+Hand-writing it is fine too; the minimum is:
+
 ```toml
 # primate.toml
 input = "constants"

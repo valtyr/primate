@@ -21,8 +21,18 @@ Rust, TypeScript, and Python.
    cargo install primate --locked
    ```
 
-2. Drop a `primate.toml` at the project root pointing at a directory of
-   `.prim` files and listing your targets:
+2. Scaffold a `primate.toml` at the project root:
+
+   ```sh
+   primate init
+   ```
+
+   The wizard asks where your `.prim` files will live, which target
+   languages to generate, and where each one writes its output. The
+   resulting `primate.toml` is heavily commented and lists every
+   option each generator accepts at its default — so you see what's
+   tunable without leaving the editor. Hand-writing it is fine too;
+   the minimum is:
 
    ```toml
    input = "constants"
