@@ -14,7 +14,7 @@ use crate::generators::rust::RustGenerator;
 use crate::generators::typescript::TypeScriptGenerator;
 use crate::ir::{CodeGenRequest, GeneratedFile};
 use crate::parser::{ConstFile, discover_files, parse_project};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -148,8 +148,13 @@ fn run_loop(
                 if k.kind != KeyEventKind::Press {
                     continue;
                 }
+                // Quit on q / Esc / Ctrl-C / Ctrl-D. Raw mode swallows the
+                // SIGINT/SIGQUIT a non-raw terminal would have produced,
+                // so we have to recognize the key combos explicitly.
+                let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
                 match k.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('c') | KeyCode::Char('d') if ctrl => return Ok(()),
                     KeyCode::Char('r') => app.pending_rebuild = true,
                     _ => {}
                 }
