@@ -164,6 +164,7 @@ Or use a build target that ensures `primate build` runs before tests.
 
 ## See also
 
+- [`primate init`](./init.md) — scaffold a `primate.toml`.
 - [`primate fmt`](./fmt.md) — formatter.
 - [`primate lsp`](./lsp.md) — language server (used by editors).
 - [Plugins](../plugins/protocol.md) — bring your own generator.

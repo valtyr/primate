@@ -32,18 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
-/// The ASCII banner rendered at the top in ANSI Magenta + bold so it
-/// reads on both light and dark terminals.
-const HEADER: &[&str] = &[
-    "⠀⠀⠀⠀⣠⣶⣿⣿⣷⣦⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-    "⠀⠀⣴⣶⣿⠋⣉⠉⣁⠙⣿⣿⡇⠀⠀⠀⠀⠀⢀⣀⣀⣀⣀⡀⠀⠀⠀⢀⣀⣀⣀⠀⠀⠀",
-    "⠀⠀⠻⢿⣿⣄⠉⢤⠉⢠⣿⣏⣁⣤⣴⣶⣾⣿⣿⣿⣿⠿⠛⠻⢷⣆⠀⠘⠛⠛⠿⣿⣦⠀",
-    "⠀⠀⢀⣄⠻⣿⣄⠀⢀⣼⣿⣿⣿⣿⣿⠿⠟⠋⠉⣀⣴⣾⣿⣿⣦⠉⠀⠀⠀⠀⠀⠈⣿⣧",
-    "⠀⢀⣾⣿⡇⠈⢿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣤⣤⣾⣿⣿⣿⠿⣿⣿⣧⠀⠀⠀⠀⠀⠀⣸⣿",
-    "⢀⣾⣿⣿⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣟⣁⣀⢻⣿⣿⡆⠀⠀⠀⠀⢠⣿⡏",
-    "⣼⣿⣿⣿⣿⣿⡿⠟⠻⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡆⢻⣿⣿⣌⠻⢿⣷⣶⣶⣄",
-    "⠙⠿⠿⠛⠉⠁⠀⠀⠀⠀⠉⠙⠛⠛⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠈⠻⠿⠿⠿⠈⠿⠿⠿⠋",
-];
+use super::logo::HEADER;
 
 /// Snapshot of the most recent build. The TUI redraws against this
 /// after every build completes.

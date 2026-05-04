@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "primate.toml",
+  "description": "Root configuration structure.",
+  "type": "object",
+  "required": [
+    "input",
+    "output"
+  ],
+  "properties": {
+    "input": {
+      "description": "Directory of `.prim` source files, relative to `primate.toml`. primate walks this recursively; subdirectories become `::`-separated namespaces in generated output.",
+      "type": "string"
+    },
+    "output": {
+      "description": "One [[output]] block per generator target. At least one is required.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/OutputConfig"
+      }
+    },
+    "sourcemap": {
+      "description": "Where the IDE sourcemap is written (defaults to `primate.sourcemap.json` next to this config). The LSP uses it to jump between source `.prim` lines and generated output.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "OutputConfig": {
+      "description": "One generator target.",
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "generator": {
+          "description": "Built-in generator name. Exactly one of `generator` or `plugin` must be set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "description": "Generator-specific knobs. The accepted keys depend on the generator — see the per-generator section in the build docs.",
+          "default": {},
+          "type": "object",
+          "additionalProperties": true
+        },
+        "path": {
+          "description": "Where the generator writes its output. A directory for `typescript` and `python`; a single `.rs` file for `rust`.",
+          "type": "string"
+        },
+        "plugin": {
+          "description": "External plugin name (an executable on `PATH`, or an absolute path). Exactly one of `generator` or `plugin` must be set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

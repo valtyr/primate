@@ -15,6 +15,7 @@
 
 # CLI
 
+- [`primate init`](./cli/init.md)
 - [`primate build`](./cli/build.md)
 - [`primate fmt`](./cli/fmt.md)
 - [`primate lsp`](./cli/lsp.md)

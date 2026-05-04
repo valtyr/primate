@@ -47,3 +47,17 @@ jobs:
       # nits. Tighten to `-D warnings` once the existing nits are cleaned up.
       - run: cargo clippy --locked --all-targets
 
+  schema:
+    name: schema is up-to-date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Re-derive primate.schema.json from the Config struct and
+      # fail if it differs from what's committed. This keeps the
+      # serde types as the single source of truth and prevents the
+      # schema from drifting silently.
+      - run: cargo run --locked -- gen-schema
+      - run: git diff --exit-code primate.schema.json
+
