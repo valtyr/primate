@@ -876,7 +876,7 @@ dependencies = [
 
 [[package]]
 name = "primate"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "crossterm 0.28.1",
