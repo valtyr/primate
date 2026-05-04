@@ -88,20 +88,16 @@ pub enum Command {
 
     /// Scaffold a `primate.toml` in the current directory.
     ///
-    /// Prompt-driven by default: walks you through the input directory,
-    /// which built-in targets (Rust, TypeScript, Python) to enable, where
-    /// each one writes its output, and any external plugins. With `--yes`
-    /// it accepts every default and writes the file non-interactively;
-    /// with `--force` it overwrites an existing `primate.toml`.
+    /// Walks you through the source directory, which target languages
+    /// (TypeScript, Rust, Python) to enable, the most-impactful style
+    /// option for each, the output path, and any external plugins. The
+    /// resulting `primate.toml` is heavily commented and lists every
+    /// option each picked generator accepts — defaults filled in — so
+    /// you see what's tunable without consulting the docs.
     ///
-    /// Only the config file is created — primate is meant to drop into an
-    /// existing repo, not start a project on its own.
+    /// Only the config file is created — primate is meant to drop into
+    /// an existing repo, not start a project on its own.
     Init {
-        /// Skip prompts and accept all defaults (all three built-in
-        /// targets at sensible paths, no plugins, `constants/` as input).
-        #[arg(short, long)]
-        yes: bool,
-
         /// Overwrite an existing `primate.toml`.
         #[arg(short, long)]
         force: bool,
@@ -176,8 +172,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::Fmt { paths, check }) => {
             run_fmt(&cli.config, paths, check)?;
         }
-        Some(Command::Init { yes, force }) => {
-            init::run(yes, force)?;
+        Some(Command::Init { force }) => {
+            init::run(force)?;
         }
         Some(Command::Skill {
             target,
