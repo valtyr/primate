@@ -8,7 +8,15 @@ repository = "https://github.com/valtyr/primate"
 
 [language_servers.primate]
 name = "primate"
-languages = ["primate"]
+# primate LSP also serves the languages we generate to, so
+# go-to-definition on a constant in a generated `.ts`/`.rs`/`.py`
+# file jumps back to its `.prim` source via the sourcemap. The LSP
+# is gated to only respond on files it actually knows about
+# (`.prim` files for everything else, `goto-definition` for
+# generated files that match a sourcemap entry); requests for
+# unrelated files in those languages return null and the editor
+# falls through to the language's primary LSP.
+languages = ["primate", "typescript", "javascript", "rust", "python"]
 
 [grammars.primate]
 # Tree-sitter grammar lives in this same repo, under
