@@ -456,7 +456,6 @@ fn run_generate_watch(
     watch_tui::run(config_path.clone(), input_override)
 }
 
-
 fn run_skill(
     target: &str,
     output: Option<PathBuf>,

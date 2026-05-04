@@ -7,16 +7,16 @@
 
 use crate::config::Config;
 use crate::diagnostics::{Diagnostic as PrimateDiagnostic, Severity};
+use crate::generators::Generator;
 use crate::generators::python::PythonGenerator;
 use crate::generators::rust::RustGenerator;
 use crate::generators::typescript::TypeScriptGenerator;
-use crate::generators::Generator;
 use crate::ir::{CodeGenRequest, GeneratedFile};
 use crate::parser::{discover_files, parse_project};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 use ratatui::backend::CrosstermBackend;
@@ -28,7 +28,7 @@ use ratatui::{Frame, Terminal};
 use std::collections::HashMap;
 use std::io::{self, Stdout};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 /// The ASCII banner — six rows of braille glyphs depicting the primate
@@ -86,7 +86,9 @@ pub fn run(
     input_override: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load(&config_path)?;
-    let input_dir = input_override.clone().unwrap_or_else(|| config.input.clone());
+    let input_dir = input_override
+        .clone()
+        .unwrap_or_else(|| config.input.clone());
 
     // Set up the file watcher before we touch the terminal so a watcher
     // failure doesn't leave the terminal in raw mode.
@@ -227,7 +229,10 @@ fn draw_header(f: &mut Frame, area: ratatui::layout::Rect) {
 
 fn draw_status(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     let mut spans: Vec<Span> = Vec::new();
-    spans.push(Span::styled("watching ", Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(
+        "watching ",
+        Style::default().fg(Color::DarkGray),
+    ));
     spans.push(Span::styled(
         app.input_dir.display().to_string(),
         Style::default().add_modifier(Modifier::BOLD),
@@ -282,10 +287,12 @@ fn draw_generated(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
         Some(last) if !last.generated.is_empty() => last
             .generated
             .iter()
-            .map(|p| ListItem::new(Line::from(vec![
-                Span::styled("→ ", Style::default().fg(Color::DarkGray)),
-                Span::raw(p.clone()),
-            ])))
+            .map(|p| {
+                ListItem::new(Line::from(vec![
+                    Span::styled("→ ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(p.clone()),
+                ]))
+            })
             .collect(),
         Some(_) => vec![ListItem::new(Span::styled(
             "(no files generated)",
@@ -296,11 +303,7 @@ fn draw_generated(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
             Style::default().fg(Color::DarkGray),
         ))],
     };
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" generated "),
-    );
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" generated "));
     f.render_widget(list, area);
 }
 
@@ -440,7 +443,9 @@ fn do_build(config_path: &Path) -> BuildSnapshot {
                             .files
                     }
                     "rust" => {
-                        RustGenerator::from_options(&options).generate(&request).files
+                        RustGenerator::from_options(&options)
+                            .generate(&request)
+                            .files
                     }
                     "python" => {
                         PythonGenerator::from_options(&options)
