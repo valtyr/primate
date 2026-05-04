@@ -104,6 +104,13 @@ pub enum Command {
         force: bool,
     },
 
+    /// Regenerate `primate.schema.json` from the `Config` struct.
+    /// Dev/CI tool — hidden from `--help`. Run from a primate
+    /// checkout; CI's `schema is up-to-date` job runs this and
+    /// fails if the committed file doesn't match.
+    #[command(hide = true)]
+    GenSchema,
+
     /// Write a primate skill file for AI coding agents (a terse cheat-sheet
     /// covering syntax, setup, the always-fmt-after-edits rule, and common
     /// patterns).
@@ -175,6 +182,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Init { force }) => {
             init::run(force)?;
+        }
+        Some(Command::GenSchema) => {
+            run_gen_schema()?;
         }
         Some(Command::Skill {
             target,
@@ -476,6 +486,25 @@ fn run_generate_watch(
     input_override: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     watch_tui::run(config_path.clone(), input_override)
+}
+
+/// Regenerate `primate.schema.json` at the repo root. The bin used
+/// to live in `src/bin/gen_schema.rs` behind a feature flag — this
+/// rolled into the main CLI as a hidden subcommand so `cargo install
+/// primate` only ever lands one binary, with no `[[bin]]` /
+/// `[features]` plumbing in `Cargo.toml`.
+fn run_gen_schema() -> Result<(), Box<dyn std::error::Error>> {
+    let schema = schemars::schema_for!(crate::config::Config);
+    let mut json = serde_json::to_string_pretty(&schema)?;
+    json.push('\n');
+
+    // Write next to where the binary's source lives (i.e. the repo
+    // root). Using CARGO_MANIFEST_DIR keeps this honest — running
+    // the command outside a primate checkout is meaningless.
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("primate.schema.json");
+    std::fs::write(&path, json).map_err(|e| format!("writing {}: {}", path.display(), e))?;
+    eprintln!("Wrote {}", path.display());
+    Ok(())
 }
 
 fn run_skill(
