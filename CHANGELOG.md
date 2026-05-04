@@ -5,6 +5,26 @@ All notable changes to **primate** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/valtyr/primate/compare/v0.1.4...v0.2.0) - 2026-05-04
+
+### Added
+
+- *(tui)* quit on Ctrl-C and Ctrl-D
+- *(tui)* float the logo top-right, hide on narrow terminals
+- *(tui)* source-first layout with inline diagnostics
+- *(skill)* default to AGENTS.md, add Claude target with frontmatter
+- `primate skill` command + watch-mode TUI
+
+### Fixed
+
+- *(tui)* use ANSI Magenta for the header so it works on both themes
+
+### Other
+
+- cargo fmt
+- Bake font into logo
+- pass over the book — install instructions, generator outputs, tone
+
 ## [0.1.4](https://github.com/valtyr/primate/compare/v0.1.3...v0.1.4) - 2026-04-30
 
 ### Added
