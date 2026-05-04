@@ -2,6 +2,7 @@
 //!
 //! Implements command-line argument parsing and command dispatch.
 
+mod init;
 mod watch_tui;
 
 use crate::config::Config;
@@ -85,6 +86,27 @@ pub enum Command {
         check: bool,
     },
 
+    /// Scaffold a `primate.toml` in the current directory.
+    ///
+    /// Prompt-driven by default: walks you through the input directory,
+    /// which built-in targets (Rust, TypeScript, Python) to enable, where
+    /// each one writes its output, and any external plugins. With `--yes`
+    /// it accepts every default and writes the file non-interactively;
+    /// with `--force` it overwrites an existing `primate.toml`.
+    ///
+    /// Only the config file is created — primate is meant to drop into an
+    /// existing repo, not start a project on its own.
+    Init {
+        /// Skip prompts and accept all defaults (all three built-in
+        /// targets at sensible paths, no plugins, `constants/` as input).
+        #[arg(short, long)]
+        yes: bool,
+
+        /// Overwrite an existing `primate.toml`.
+        #[arg(short, long)]
+        force: bool,
+    },
+
     /// Write a primate skill file for AI coding agents (a terse cheat-sheet
     /// covering syntax, setup, the always-fmt-after-edits rule, and common
     /// patterns).
@@ -153,6 +175,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Fmt { paths, check }) => {
             run_fmt(&cli.config, paths, check)?;
+        }
+        Some(Command::Init { yes, force }) => {
+            init::run(yes, force)?;
         }
         Some(Command::Skill {
             target,

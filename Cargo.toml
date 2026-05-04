@@ -48,6 +48,7 @@ lsp-types = "0.97.0"
 url = "2.5.8"
 ratatui = "0.29"
 crossterm = "0.28"
+inquire = "0.7"
 
 [profile.release]
 lto = "thin"
