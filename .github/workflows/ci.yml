@@ -58,6 +58,6 @@ jobs:
       # fail if it differs from what's committed. This keeps the
       # serde types as the single source of truth and prevents the
       # schema from drifting silently.
-      - run: cargo run --locked --bin gen_schema
+      - run: cargo run --locked --bin gen_schema --features schema-gen
       - run: git diff --exit-code primate.schema.json
 

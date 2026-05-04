@@ -51,6 +51,27 @@ crossterm = "0.28"
 inquire = "0.7"
 schemars = "0.8"
 
+[features]
+# `schema-gen` exists only so `gen_schema` doesn't get built by
+# default. `cargo install primate` (which doesn't enable any
+# features) installs just the `primate` binary; CI passes
+# `--features schema-gen` when it needs to regenerate the schema.
+default = []
+schema-gen = []
+
+# Explicit bin entries so we can gate `gen_schema` behind a feature.
+# Without the [[bin]] sections, cargo auto-discovers both targets
+# and `cargo install primate` would land `gen_schema` in every
+# user's PATH alongside `primate`.
+[[bin]]
+name = "primate"
+path = "src/main.rs"
+
+[[bin]]
+name = "gen_schema"
+path = "src/bin/gen_schema.rs"
+required-features = ["schema-gen"]
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
