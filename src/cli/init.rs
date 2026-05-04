@@ -7,21 +7,17 @@
 //! existing repos, never started in isolation.
 
 use inquire::autocompletion::{Autocomplete, Replacement};
-use inquire::{Confirm, CustomUserError, MultiSelect, Select, Text};
+use inquire::ui::{Color, RenderConfig, StyleSheet, Styled};
+use inquire::{Confirm, CustomUserError, MultiSelect, Text};
 use std::path::{Path, PathBuf};
 
 const CONFIG_PATH: &str = "primate.toml";
 
-/// One built-in target the user picked, with their answers to the
-/// associated style questions.
+/// One built-in target the user picked.
 #[derive(Clone)]
 struct BuiltinChoice {
     target: BuiltinTarget,
     path: String,
-    /// The option the user explicitly picked. Other options render
-    /// with their generator-default in the file so the user sees
-    /// what's available to tune.
-    chosen_option: (&'static str, String),
 }
 
 /// One external plugin entry.
@@ -80,6 +76,9 @@ pub fn run(force: bool) -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
+    install_render_config();
+    print_logo();
+
     println!();
     println!("  Setting up primate.\n");
 
@@ -97,6 +96,48 @@ pub fn run(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Print the primate logo in ANSI Magenta + bold. Same color rule
+/// as the watch TUI uses — ANSI named colors are themed by the
+/// terminal so the mark reads on both light and dark backgrounds.
+fn print_logo() {
+    println!();
+    for line in super::logo::HEADER {
+        println!("  \x1b[1;35m{}\x1b[0m", line);
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Theme
+// ────────────────────────────────────────────────────────────────────
+
+/// Set up a coherent visual palette for every prompt. Uses ANSI-named
+/// colors so each terminal renders them within its own scheme; avoids
+/// fixed RGB so the prompts read on both light and dark backgrounds.
+fn install_render_config() {
+    let cfg = RenderConfig::default()
+        // The leading `?` on an unanswered prompt and the `✓` on an
+        // answered one are the most visible glyphs; magenta + green
+        // give the screen a clear "in progress" → "done" rhythm.
+        .with_prompt_prefix(Styled::new("?").with_fg(Color::LightMagenta))
+        .with_answered_prompt_prefix(Styled::new("✓").with_fg(Color::LightGreen))
+        // The user's typed text — bold so it stands out from the
+        // surrounding chrome.
+        .with_text_input(StyleSheet::default().with_attr(inquire::ui::Attributes::BOLD))
+        // Help line below each prompt.
+        .with_help_message(StyleSheet::default().with_fg(Color::DarkGrey))
+        // Highlighted option in selects/multiselects.
+        .with_highlighted_option_prefix(Styled::new("›").with_fg(Color::LightMagenta))
+        .with_selected_option(Some(
+            StyleSheet::default()
+                .with_fg(Color::LightMagenta)
+                .with_attr(inquire::ui::Attributes::BOLD),
+        ))
+        // Selected items in a MultiSelect (the things with checkmarks).
+        .with_selected_checkbox(Styled::new("[x]").with_fg(Color::LightMagenta))
+        .with_unselected_checkbox(Styled::new("[ ]").with_fg(Color::DarkGrey));
+    inquire::set_global_render_config(cfg);
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Prompts
 // ────────────────────────────────────────────────────────────────────
@@ -107,6 +148,7 @@ fn prompt() -> Result<Answers, Box<dyn std::error::Error>> {
         .with_help_message("Press → to accept the suggested directory")
         .with_autocomplete(PathAutocomplete::new())
         .prompt()?;
+    note_will_be_created(&input_dir, PathRole::Input);
 
     let target_options = vec![
         BuiltinTarget::TypeScript,
@@ -170,74 +212,45 @@ fn prompt() -> Result<Answers, Box<dyn std::error::Error>> {
     })
 }
 
-/// Per-target sub-flow: ask the highest-impact style question first,
-/// then where to write output. Other options surface as defaults
-/// inside the generated file so the user sees what's available to
-/// tune without paying for it in prompts.
+/// Per-target sub-flow. We don't ask about style options here —
+/// every option each generator accepts lands in the generated file
+/// with its default, so the user sees what's available and tunes it
+/// in-place. The only thing we still need from the user is where to
+/// write output.
 fn configure_target(target: BuiltinTarget) -> Result<BuiltinChoice, Box<dyn std::error::Error>> {
-    let chosen_option = match target {
-        BuiltinTarget::TypeScript => {
-            let pick = Select::new(
-                "TypeScript: how should durations be represented?",
-                vec![
-                    "Milliseconds as number (default — works everywhere)",
-                    "Temporal.Duration (richer; needs a Temporal polyfill)",
-                ],
-            )
-            .with_help_message("Affects how `duration TIMEOUT = 30s` is emitted at the call site.")
-            .raw_prompt()?;
-            let value = if pick.index == 0 {
-                "number"
-            } else {
-                "temporal"
-            };
-            ("duration", value.to_string())
-        }
-        BuiltinTarget::Rust => {
-            let pick = Select::new(
-                "Rust: how visible should the generated module be?",
-                vec![
-                    "pub (callers anywhere can use it)",
-                    "pub(crate) (only the current crate)",
-                    "pub(super) (only the parent module)",
-                    "(private — only siblings of the file)",
-                ],
-            )
-            .with_help_message("Sets the visibility on `pub mod`, `pub const`, `pub enum`, etc.")
-            .raw_prompt()?;
-            let value = match pick.index {
-                0 => "pub",
-                1 => "pub(crate)",
-                2 => "pub(super)",
-                _ => "",
-            };
-            ("visibility", value.to_string())
-        }
-        BuiltinTarget::Python => {
-            let pick = Select::new(
-                "Python: runtime values or .pyi-style type stubs?",
-                vec![
-                    "Runtime (regular .py with values you can import)",
-                    "Stub (.pyi-style declarations only — for type-checking)",
-                ],
-            )
-            .raw_prompt()?;
-            let value = if pick.index == 0 { "runtime" } else { "stub" };
-            ("typing", value.to_string())
-        }
-    };
-
     let path = Text::new(&format!("Where should the {} output go?", target.pretty()))
         .with_default(target.default_path())
         .with_help_message(target_path_help(target))
         .with_autocomplete(PathAutocomplete::new())
         .prompt()?;
+    note_will_be_created(&path, PathRole::Output);
 
-    Ok(BuiltinChoice {
-        target,
-        path,
-        chosen_option,
-    })
+    Ok(BuiltinChoice { target, path })
+}
+
+/// Distinguish "input directory" from "output path" so the
+/// post-prompt hint is accurate. The input dir has to be filled in
+/// by the user; output paths get auto-created on `primate build`.
+#[derive(Copy, Clone)]
+enum PathRole {
+    Input,
+    Output,
+}
+
+/// Print a small hint right after a path prompt confirms, when the
+/// path doesn't exist yet. Tells the user what's about to happen so
+/// a typo (or a deliberately new path) doesn't surprise them.
+fn note_will_be_created(path: &str, role: PathRole) {
+    if Path::new(path).exists() {
+        return;
+    }
+    let msg = match role {
+        PathRole::Input => "Doesn't exist yet — create it before running `primate build`.",
+        PathRole::Output => "Doesn't exist yet — primate will create it on `primate build`.",
+    };
+    // Indent so the hint hangs under the prompt's value column;
+    // dark-grey so it reads as secondary.
+    eprintln!("\x1b[90m  {}\x1b[0m", msg);
 }
 
 fn target_path_help(target: BuiltinTarget) -> &'static str {
@@ -408,16 +421,11 @@ fn render_toml(a: &Answers) -> String {
         s.push('\n');
         s.push_str("# Generator options. Defaults shown — change as needed.\n");
         for (key, default, comment) in target_options(b.target) {
-            let value = if b.chosen_option.0 == *key {
-                b.chosen_option.1.as_str()
-            } else {
-                *default
-            };
             // Pad the key column so values align across options.
             s.push_str(&format!(
                 "options.{:11} = {:<25} # {}\n",
                 key,
-                quote_toml(value),
+                quote_toml(default),
                 comment
             ));
         }
@@ -511,31 +519,25 @@ fn print_next_steps(a: &Answers) {
 mod tests {
     use super::*;
 
-    fn ts_choice(path: &str, duration: &str) -> BuiltinChoice {
+    fn ts_choice(path: &str) -> BuiltinChoice {
         BuiltinChoice {
             target: BuiltinTarget::TypeScript,
             path: path.into(),
-            chosen_option: ("duration", duration.into()),
         }
     }
 
     #[test]
-    fn renders_picked_option() {
+    fn renders_every_option_at_its_default() {
         let a = Answers {
             input_dir: "constants".into(),
-            builtins: vec![ts_choice("web/src/generated/constants/", "temporal")],
+            builtins: vec![ts_choice("web/src/generated/constants/")],
             plugins: Vec::new(),
         };
         let out = render_toml(&a);
-        // The user's pick lands in the toml.
-        assert!(
-            out.contains("options.duration    = \"temporal\""),
-            "got:\n{}",
-            out
-        );
-        // Other options come along with their generator defaults so
-        // the user discovers what's tunable.
+        // Every option each picked generator accepts shows up so the
+        // user discovers what's tunable without reading the docs.
         assert!(out.contains("options.naming      = \"camelCase\""));
+        assert!(out.contains("options.duration    = \"number\""));
         assert!(out.contains("options.u64         = \"number\""));
         assert!(out.contains("options.enumStyle   = \"literal\""));
     }

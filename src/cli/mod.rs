@@ -3,6 +3,7 @@
 //! Implements command-line argument parsing and command dispatch.
 
 mod init;
+mod logo;
 mod watch_tui;
 
 use crate::config::Config;
