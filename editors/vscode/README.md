@@ -26,9 +26,11 @@ shared values once; generate typed Rust, TypeScript, and Python.
    cargo install primate --locked
    ```
 
-   The extension shells out to `primate lsp`. The CLI must be on `PATH`,
-   or you can point the extension at a custom binary via the
-   `primate.server.path` setting.
+   The extension shells out to `primate lsp`. Any install method works
+   (`cargo install`, mise, asdf, Homebrew, …): the extension searches
+   its own `PATH`, your login shell's `PATH`, `mise which primate`, and
+   the usual install directories. To use a specific binary, set
+   `primate.server.path` (supports `~` and `${workspaceFolder}`).
 
 2. Install this extension from the VS Code Marketplace.
 
@@ -39,12 +41,14 @@ shared values once; generate typed Rust, TypeScript, and Python.
 
 | Setting              | Default     | Description                                                        |
 | -------------------- | ----------- | ------------------------------------------------------------------ |
-| `primate.server.path` | `"primate"` | Path to the `primate` executable. Defaults to looking on `PATH`.   |
+| `primate.server.path` | `"primate"` | Path to the `primate` executable. Supports `~` and `${workspaceFolder}`. By default the extension searches `PATH`, your login shell's `PATH`, mise, and common install directories. |
 
 ## Commands
 
 - **primate: Restart LSP Server** — kill and re-launch the language server,
-  useful when you've upgraded the CLI binary.
+  useful when you've upgraded or just installed the CLI binary. The
+  binary is located again on every restart, and the **primate LSP** output
+  channel logs where it looked.
 
 ## See also
 
