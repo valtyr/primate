@@ -73,6 +73,22 @@ impl Config {
         Ok(config)
     }
 
+    /// Directory of `.prim` sources, resolved the same way everywhere:
+    /// `input` is relative to the directory containing `primate.toml`
+    /// (absolute paths are used as-is). The CLI, the watch TUI and the
+    /// LSP must all go through this so they agree on which files belong
+    /// to a project and therefore on every file's namespace.
+    pub fn input_dir(&self, config_path: &std::path::Path) -> PathBuf {
+        if self.input.is_absolute() {
+            return self.input.clone();
+        }
+        let config_dir = config_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."));
+        config_dir.join(&self.input)
+    }
+
     /// Get the sourcemap path, using the override if specified, otherwise defaulting
     /// to primate.sourcemap.json in the same directory as the config file.
     pub fn sourcemap_path(&self, config_path: &std::path::Path) -> PathBuf {

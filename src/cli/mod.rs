@@ -205,11 +205,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_check(config_path: &PathBuf, format: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load(config_path)?;
-    let files = discover_files(&config.input)?;
+    let (config, files) = crate::parser::discover_project(config_path)?;
 
     if files.is_empty() {
-        eprintln!("No .prim files found in {}", config.input.display());
+        eprintln!(
+            "No .prim files found in {}",
+            config.input_dir(config_path).display()
+        );
         return Ok(());
     }
 
@@ -277,13 +279,16 @@ fn run_generate(
     input_override: Option<PathBuf>,
     _output_override: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load(config_path)?;
-    let input_dir = input_override.as_ref().unwrap_or(&config.input);
-
-    let files = discover_files(input_dir)?;
+    let (config, files) = match input_override {
+        Some(input_dir) => (Config::load(config_path)?, discover_files(&input_dir)?),
+        None => crate::parser::discover_project(config_path)?,
+    };
 
     if files.is_empty() {
-        eprintln!("No .prim files found in {}", input_dir.display());
+        eprintln!(
+            "No .prim files found in {}",
+            config.input_dir(config_path).display()
+        );
         return Ok(());
     }
 

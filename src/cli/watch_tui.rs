@@ -13,7 +13,7 @@ use crate::generators::python::PythonGenerator;
 use crate::generators::rust::RustGenerator;
 use crate::generators::typescript::TypeScriptGenerator;
 use crate::ir::{CodeGenRequest, GeneratedFile};
-use crate::parser::{ConstFile, discover_files, parse_project};
+use crate::parser::{ConstFile, parse_project};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -574,24 +574,12 @@ fn do_build(config_path: &Path) -> BuildSnapshot {
     let started = Instant::now();
     let mut snap = BuildSnapshot::default();
 
-    let config = match Config::load(config_path) {
-        Ok(c) => c,
+    let (config, files) = match crate::parser::discover_project(config_path) {
+        Ok(cf) => cf,
         Err(e) => {
             snap.diagnostics.push(synthetic_error(
                 config_path,
-                format!("loading config: {}", e),
-            ));
-            snap.duration = started.elapsed();
-            return snap;
-        }
-    };
-
-    let files = match discover_files(&config.input) {
-        Ok(f) => f,
-        Err(e) => {
-            snap.diagnostics.push(synthetic_error(
-                &config.input,
-                format!("scanning input: {}", e),
+                format!("loading project: {}", e),
             ));
             snap.duration = started.elapsed();
             return snap;

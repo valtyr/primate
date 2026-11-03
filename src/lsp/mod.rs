@@ -328,10 +328,44 @@ fn main_loop(
     Ok(())
 }
 
+/// Walk upward from `start` looking for `config_name`. Stops after checking
+/// the first ancestor that is one of `stop_at` (the workspace folders), or
+/// at the filesystem root when `stop_at` is empty or never matched.
+fn find_config_upward(start: &Path, config_name: &str, stop_at: &[PathBuf]) -> Option<PathBuf> {
+    let mut dir = if start.is_dir() {
+        Some(start)
+    } else {
+        start.parent()
+    };
+    while let Some(d) = dir {
+        let candidate = d.join(config_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        if stop_at.iter().any(|root| root == d) {
+            break;
+        }
+        dir = d.parent();
+    }
+    None
+}
+
 impl ServerState {
-    /// Find all config files in workspace folders (immediate children only)
-    fn find_configs_in_workspaces(&self) -> Vec<PathBuf> {
+    /// Find config files: `primate.toml` at each workspace root, one level
+    /// below it, and (when `near` is given) the nearest one above that
+    /// document at any depth. The upward walk is what makes deeper layouts
+    /// such as `packages/constants/primate.toml` with sources in
+    /// `packages/constants/src/` resolve to the right project and
+    /// therefore the right namespaces.
+    fn find_configs_in_workspaces(&self, near: Option<&Path>) -> Vec<PathBuf> {
         let mut configs = Vec::new();
+        if let Some(doc) = near {
+            if let Some(found) = find_config_upward(doc, &self.config_name, &self.workspace_folders)
+            {
+                eprintln!("[LSP] Found config above document: {}", found.display());
+                configs.push(found);
+            }
+        }
         for folder in &self.workspace_folders {
             // Check workspace_root/primate.toml
             let config_path = folder.join(&self.config_name);
@@ -343,7 +377,8 @@ impl ServerState {
                 configs.push(config_path);
             }
             // Check workspace_root/*/primate.toml (one level deep)
-            // Handles: packages/constants/primate.toml, apps/foo/primate.toml
+            // Handles: apps/foo/primate.toml. Deeper projects are found by
+            // the upward walk from the open document above.
             if let Ok(entries) = std::fs::read_dir(folder) {
                 for entry in entries.flatten() {
                     if entry.path().is_dir() {
@@ -359,13 +394,20 @@ impl ServerState {
                 }
             }
         }
+        // Dedup by canonical path: the upward walk and the shallow scan can
+        // find the same file.
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+        configs.retain(|c| seen.insert(std::fs::canonicalize(c).unwrap_or_else(|_| c.clone())));
         configs
     }
 
     /// Search for config files - first in workspace folders, then upward from document
     fn try_load_config_from_document(&mut self, uri: &Uri) {
-        // First, try to find configs in workspace folders
-        let workspace_configs = self.find_configs_in_workspaces();
+        let doc_path = url::Url::parse(uri.as_str())
+            .ok()
+            .and_then(|u| u.to_file_path().ok());
+        // First, try to find configs in workspace folders (and above the document)
+        let workspace_configs = self.find_configs_in_workspaces(doc_path.as_deref());
         if !workspace_configs.is_empty() {
             // Load the first config found (TODO: support multiple sourcemaps for multi-package monorepos)
             for config_path in &workspace_configs {
@@ -375,29 +417,20 @@ impl ServerState {
             return;
         }
 
-        // Fallback: parse URI to file path and search upward
-        let doc_path = match url::Url::parse(uri.as_str())
-            .ok()
-            .and_then(|u| u.to_file_path().ok())
-        {
+        // Fallback: search upward from the document without stopping at the
+        // workspace folder (the document may live outside every folder).
+        let doc_path = match doc_path {
             Some(p) => p,
             None => {
                 eprintln!("[LSP] Could not parse document URI: {}", uri.as_str());
                 return;
             }
         };
-
-        // Search upward for config file
-        let mut search_dir = doc_path.parent();
-        while let Some(dir) = search_dir {
-            let config_path = dir.join(&self.config_name);
-            if config_path.exists() {
-                eprintln!("[LSP] Found config at: {}", config_path.display());
-                self.load_sourcemap(&config_path);
-                self.config_loaded = true;
-                return;
-            }
-            search_dir = dir.parent();
+        if let Some(config_path) = find_config_upward(&doc_path, &self.config_name, &[]) {
+            eprintln!("[LSP] Found config at: {}", config_path.display());
+            self.load_sourcemap(&config_path);
+            self.config_loaded = true;
+            return;
         }
 
         eprintln!(
@@ -617,70 +650,56 @@ impl ServerState {
         // is its own root, with its own `input`. We discover each project
         // independently and dedup by canonical path so a file isn't pulled
         // in twice.
-        let configs = self.find_configs_in_workspaces();
-        let mut input_dirs: Vec<PathBuf> = Vec::new();
+        let configs = self.find_configs_in_workspaces(current_path.as_deref());
 
+        // Each project's files come from the same `discover_project` the
+        // CLI uses, so the LSP can't disagree with `primate check` about
+        // which files exist or what namespace they get.
+        let mut discovered: Vec<ConstFile> = Vec::new();
+        let mut any_project = false;
         for config_path in &configs {
-            let input_dir = match crate::config::Config::load(config_path) {
-                Ok(config) => {
-                    let config_dir = config_path
-                        .parent()
-                        .filter(|p| !p.as_os_str().is_empty())
-                        .unwrap_or_else(|| Path::new("."));
-                    if config.input.is_absolute() {
-                        config.input
-                    } else {
-                        config_dir.join(&config.input)
-                    }
+            match crate::parser::discover_project(config_path) {
+                Ok((_, project_files)) => {
+                    any_project = true;
+                    discovered.extend(project_files);
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[LSP] Could not load {}: {} — falling back to workspace folder",
-                        config_path.display(),
-                        e,
-                    );
-                    continue;
+                    eprintln!("[LSP] Could not load {}: {}", config_path.display(), e);
                 }
-            };
-            input_dirs.push(input_dir);
+            }
         }
 
         // If no configs are loadable, treat the workspace folders themselves
         // as input dirs. This lets the LSP work in a directory that has
         // .prim files but no primate.toml yet (e.g. fresh checkout).
-        if input_dirs.is_empty() {
-            input_dirs.extend(self.workspace_folders.iter().cloned());
-        }
-
-        for input_dir in &input_dirs {
-            match crate::parser::discover_files(input_dir) {
-                Ok(discovered) => {
-                    for mut f in discovered {
-                        let canon =
-                            std::fs::canonicalize(&f.path).unwrap_or_else(|_| f.path.clone());
-                        if !seen.insert(canon.clone()) {
-                            continue;
-                        }
-                        if let Some(ref cur_canon) = current_canon {
-                            if &canon == cur_canon {
-                                f.content = current_content.to_string();
-                                current_included = true;
-                            }
-                        }
-                        // Use the canonical path so diagnostic matching is
-                        // stable regardless of how the file was discovered.
-                        f.path = canon;
-                        files.push(f);
-                    }
-                }
-                Err(e) => {
-                    eprintln!(
+        if !any_project {
+            for folder in &self.workspace_folders {
+                match crate::parser::discover_files(folder) {
+                    Ok(fs) => discovered.extend(fs),
+                    Err(e) => eprintln!(
                         "[LSP] discover_files failed for {}: {}",
-                        input_dir.display(),
-                        e,
-                    );
+                        folder.display(),
+                        e
+                    ),
                 }
             }
+        }
+
+        for mut f in discovered {
+            let canon = std::fs::canonicalize(&f.path).unwrap_or_else(|_| f.path.clone());
+            if !seen.insert(canon.clone()) {
+                continue;
+            }
+            if let Some(ref cur_canon) = current_canon {
+                if &canon == cur_canon {
+                    f.content = current_content.to_string();
+                    current_included = true;
+                }
+            }
+            // Use the canonical path so diagnostic matching is stable
+            // regardless of how the file was discovered.
+            f.path = canon;
+            files.push(f);
         }
 
         // If the current document isn't inside any project's `input` (or
@@ -2058,6 +2077,229 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_workspace() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "primate-lsp-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn state_for(root: &Path) -> ServerState {
+        ServerState {
+            documents: HashMap::new(),
+            sourcemap: None,
+            sourcemap_base_path: root.to_path_buf(),
+            config_name: "primate.toml".into(),
+            config_loaded: false,
+            workspace_folders: vec![root.to_path_buf()],
+            parse_cache: HashMap::new(),
+        }
+    }
+
+    /// A config two levels below the workspace root, with sources in its
+    /// own `src/`, must be found from an open document inside it. Before
+    /// the upward walk the server only looked one level deep, fell back to
+    /// treating the workspace root as `input`, and derived namespaces like
+    /// `packages::constants::src::detection` instead of `detection`, so
+    /// `use detection::ModelClass` failed with `unknown type`.
+    #[test]
+    fn finds_config_above_document_at_any_depth() {
+        let root = temp_workspace();
+        let project = root.join("packages").join("constants");
+        let src = project.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            project.join("primate.toml"),
+            "input = \"src\"\n\n[[output]]\ngenerator = \"typescript\"\npath = \"out/\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("detection.prim"),
+            "enum ModelClass {\n    Fast,\n    Accurate,\n}\n",
+        )
+        .unwrap();
+        let compare = src.join("print_compare.prim");
+        let compare_src = "use detection::ModelClass\nModelClass DEFAULT = Fast\n";
+        std::fs::write(&compare, compare_src).unwrap();
+
+        let state = state_for(&root);
+        let configs = state.find_configs_in_workspaces(Some(&compare));
+        assert_eq!(configs, vec![project.join("primate.toml")]);
+
+        let uri: Uri = url::Url::from_file_path(&compare)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap();
+        let (files, _) = state.collect_workspace_files_with_buffer(&uri, compare_src);
+        let mut namespaces: Vec<&str> = files.iter().map(|f| f.namespace.as_str()).collect();
+        namespaces.sort();
+        assert_eq!(namespaces, ["detection", "print_compare"]);
+
+        let parsed = crate::parser::parse_project(files);
+        assert!(!parsed.diagnostics.has_errors(), "{:?}", parsed.diagnostics);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Write a small multi-file project under `project` (which may be any
+    /// depth below the workspace root) and return the path of a file that
+    /// depends on a cross-file import.
+    fn write_project(project: &Path, input: &str) -> PathBuf {
+        let src = project.join(input);
+        std::fs::create_dir_all(src.join("nested")).unwrap();
+        std::fs::write(
+            project.join("primate.toml"),
+            format!(
+                "input = \"{}\"\n\n[[output]]\ngenerator = \"typescript\"\npath = \"out/\"\n",
+                input
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("detection.prim"),
+            "enum ModelClass {\n    Fast,\n    Accurate,\n}\n",
+        )
+        .unwrap();
+        std::fs::write(src.join("nested").join("deep.prim"), "u32 DEPTH = 2\n").unwrap();
+        let compare = src.join("print_compare.prim");
+        std::fs::write(
+            &compare,
+            // One deliberate error so diagnostics are non-empty and must
+            // match between the two paths.
+            "use detection::ModelClass\nModelClass DEFAULT = Fast\nu32 BAD = 5000000000\n",
+        )
+        .unwrap();
+        compare
+    }
+
+    /// The LSP must see exactly the project `primate check` sees: same
+    /// files, same namespaces, same diagnostics. This is the guard against
+    /// the LSP's project discovery drifting from the CLI's again.
+    fn assert_lsp_matches_cli(root: &Path, project: &Path, doc: &Path) {
+        // CLI path.
+        let (_, cli_files) = crate::parser::discover_project(&project.join("primate.toml"))
+            .expect("cli discovers project");
+        let mut cli_view: Vec<(PathBuf, String)> = cli_files
+            .iter()
+            .map(|f| (std::fs::canonicalize(&f.path).unwrap(), f.namespace.clone()))
+            .collect();
+        cli_view.sort();
+        let cli_project = crate::parser::parse_project(cli_files);
+
+        // LSP path, with the open buffer equal to the on-disk content.
+        let state = state_for(root);
+        let uri: Uri = url::Url::from_file_path(doc)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap();
+        let content = std::fs::read_to_string(doc).unwrap();
+        let (lsp_files, _) = state.collect_workspace_files_with_buffer(&uri, &content);
+        let mut lsp_view: Vec<(PathBuf, String)> = lsp_files
+            .iter()
+            .map(|f| (f.path.clone(), f.namespace.clone()))
+            .collect();
+        lsp_view.sort();
+        let lsp_project = crate::parser::parse_project(lsp_files);
+
+        assert_eq!(lsp_view, cli_view, "LSP and CLI disagree on project files");
+
+        let summarize = |d: &Diagnostics| -> Vec<(String, u32, String)> {
+            let mut v: Vec<_> = d
+                .diagnostics
+                .iter()
+                .map(|d| {
+                    let file = std::fs::canonicalize(&d.file)
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| d.file.clone());
+                    (file, d.line, d.code.clone())
+                })
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            summarize(&lsp_project.diagnostics),
+            summarize(&cli_project.diagnostics),
+            "LSP and CLI disagree on diagnostics"
+        );
+        assert!(
+            cli_project
+                .diagnostics
+                .diagnostics
+                .iter()
+                .all(|d| d.code != "unknown-type"),
+            "cross-file import failed to resolve: {:?}",
+            cli_project.diagnostics
+        );
+    }
+
+    #[test]
+    fn lsp_matches_cli_config_at_workspace_root() {
+        let root = temp_workspace();
+        let doc = write_project(&root, "constants");
+        assert_lsp_matches_cli(&root, &root, &doc);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn lsp_matches_cli_config_one_level_down() {
+        let root = temp_workspace();
+        let project = root.join("shared");
+        let doc = write_project(&project, "constants");
+        assert_lsp_matches_cli(&root, &project, &doc);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn lsp_matches_cli_config_two_levels_down() {
+        let root = temp_workspace();
+        let project = root.join("packages").join("constants");
+        let doc = write_project(&project, "src");
+        assert_lsp_matches_cli(&root, &project, &doc);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn lsp_matches_cli_with_dotted_input() {
+        // `input = "."` puts primate.toml inside the input directory.
+        let root = temp_workspace();
+        let project = root.join("apps").join("api").join("constants");
+        let doc = write_project(&project, ".");
+        assert_lsp_matches_cli(&root, &project, &doc);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn upward_walk_stops_at_workspace_root() {
+        let root = temp_workspace();
+        let outer = root.join("outer");
+        let ws = outer.join("ws");
+        let deep = ws.join("a").join("b");
+        std::fs::create_dir_all(&deep).unwrap();
+        // A config above the workspace folder must not be picked up.
+        std::fs::write(outer.join("primate.toml"), "input = \".\"\n").unwrap();
+        let doc = deep.join("x.prim");
+        std::fs::write(&doc, "u32 X = 1\n").unwrap();
+
+        assert_eq!(
+            find_config_upward(&doc, "primate.toml", &[ws.clone()]),
+            None
+        );
+        assert_eq!(
+            find_config_upward(&doc, "primate.toml", &[]),
+            Some(outer.join("primate.toml"))
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     #[test]
     fn extracts_type_for_u32_const() {

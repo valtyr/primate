@@ -33,6 +33,25 @@ pub struct ParsedProject {
     pub diagnostics: Diagnostics,
 }
 
+/// Load a project's config and discover its `.prim` files. This is the one
+/// entry point for "which files make up the project at this `primate.toml`",
+/// shared by `primate check`, `primate build`, the watch TUI and the LSP.
+pub fn discover_project(
+    config_path: &Path,
+) -> Result<(crate::config::Config, Vec<ConstFile>), ProjectError> {
+    let config = crate::config::Config::load(config_path)?;
+    let files = discover_files(&config.input_dir(config_path))?;
+    Ok((config, files))
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProjectError {
+    #[error("{0}")]
+    Config(#[from] crate::config::ConfigError),
+    #[error("{0}")]
+    Discover(#[from] DiscoverError),
+}
+
 /// Discover all `.prim` files in a directory tree.
 pub fn discover_files(input_dir: &Path) -> Result<Vec<ConstFile>, DiscoverError> {
     let mut files = Vec::new();
