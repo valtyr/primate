@@ -235,8 +235,8 @@ Python supports `typing` option: "runtime" (default) or "stub" (emit .pyi only).
 r[gen.python.enum-style-option]
 Python supports `enumStyle` option for string-backed enums: "str-mixin" (default, `class Status(str, Enum)`) or "strenum" (`class Status(StrEnum)`, Python 3.11+).
 
-r[gen.python.enum-map-keys-option]
-Python supports `enumMapKeys` option: "enum" (default, `Dict[Plan, V]`) or "str" (`Dict[str, V]` for maps keyed by a string-backed enum; keys are still emitted as enum members).
+r[gen.python.enum-parse]
+Every Python enum gets a `parse(value)` classmethod returning the member with that value, or `None`. The parameter is `str` for string-backed and `int` for integer-backed enums.
 
 r[gen.python.float-literals]
 Python emits float values with a decimal point (`5.0`, not `5`), so whole-number floats stay `float` at runtime.

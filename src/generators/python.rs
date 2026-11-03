@@ -62,12 +62,6 @@ pub struct PythonGenerator {
     pub typing: TypingStyle,
     // r[impl gen.python.enum-style-option]
     pub enum_style: EnumStyle,
-    // r[impl gen.python.enum-map-keys-option]
-    pub enum_map_keys: EnumMapKeys,
-    /// `(namespace, name)` of every string-backed enum in the request.
-    /// Filled in by `generate` so `generate_type` can tell string-backed
-    /// enum keys apart from integer-backed ones.
-    string_enums: BTreeSet<(String, String)>,
 }
 
 /// Base class for string-backed enums.
@@ -79,17 +73,6 @@ pub enum EnumStyle {
     /// `class Status(StrEnum)`. Python 3.11+; `str(member)` and f-strings
     /// give the value (`"pending"`) instead of `Status.PENDING`.
     StrEnum,
-}
-
-/// How maps keyed by a string-backed enum are annotated.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum EnumMapKeys {
-    /// `Dict[Status, V]`.
-    #[default]
-    Enum,
-    /// `Dict[str, V]`. The keys are still enum members (which are `str`
-    /// instances), but type checkers accept lookups by a plain `str`.
-    Str,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -117,20 +100,7 @@ impl PythonGenerator {
             };
         }
 
-        if let Some(serde_json::Value::String(s)) = options.get("enumMapKeys") {
-            generator.enum_map_keys = match s.as_str() {
-                "str" => EnumMapKeys::Str,
-                _ => EnumMapKeys::Enum,
-            };
-        }
-
         generator
-    }
-
-    fn is_string_enum(&self, name: &str, namespace: &str) -> bool {
-        self.string_enums
-            .iter()
-            .any(|(ns, n)| n == name && (namespace.is_empty() || ns == namespace))
     }
 
     /// Walk a type and record cross-namespace enum/alias references.
@@ -183,16 +153,11 @@ impl PythonGenerator {
                 format!("Tuple[{}]", parts.join(", "))
             }
             Type::Map { key, value } => {
-                let key_type = match key.as_ref() {
-                    Type::Enum { name, namespace }
-                        if self.enum_map_keys == EnumMapKeys::Str
-                            && self.is_string_enum(name, namespace) =>
-                    {
-                        "str".to_string()
-                    }
-                    _ => self.generate_type(key),
-                };
-                format!("Dict[{}, {}]", key_type, self.generate_type(value))
+                format!(
+                    "Dict[{}, {}]",
+                    self.generate_type(key),
+                    self.generate_type(value)
+                )
             }
             Type::Tuple { elements } => {
                 let types: Vec<_> = elements.iter().map(|e| self.generate_type(e)).collect();
@@ -339,19 +304,30 @@ impl PythonGenerator {
 
         output.push_str(&format!("class {}({}):\n", name, base_class));
 
+        let (val_type, py_type) = if enum_def.backing_type == "integer" {
+            (Type::I32, "int")
+        } else {
+            (Type::String, "str")
+        };
         for variant in &enum_def.variants {
             let variant_name = to_screaming_snake_case(&variant.name);
-            let val_type = if enum_def.backing_type == "integer" {
-                Type::I32
-            } else {
-                Type::String
-            };
             output.push_str(&format!(
                 "    {} = {}\n",
                 variant_name,
                 self.generate_value(&variant.value, &val_type)
             ));
         }
+
+        // r[impl gen.python.enum-parse]
+        // Non-raising counterpart of `Plan("pro-plus")`, for values that
+        // arrive from outside the program (JSON, user input). Keeps lookups
+        // into enum-keyed maps honest: `SEATS[plan]` only type-checks once
+        // the caller has handled the `None` case.
+        output.push_str(&format!(
+            "\n    @classmethod\n    def parse(cls, value: {py}) -> Optional[\"{name}\"]:\n        \"\"\"Return the member whose value is ``value``, or ``None`` if there is none.\"\"\"\n        try:\n            return cls(value)\n        except ValueError:\n            return None\n",
+            py = py_type,
+            name = name,
+        ));
         output.push_str("\n\n");
 
         output
@@ -515,25 +491,6 @@ impl PythonGenerator {
 
 impl Generator for PythonGenerator {
     fn generate(&self, request: &CodeGenRequest) -> CodeGenResponse {
-        let generator = PythonGenerator {
-            string_enums: request
-                .enums
-                .iter()
-                .filter(|e| e.backing_type != "integer")
-                .map(|e| (e.namespace.clone(), e.name.clone()))
-                .collect(),
-            ..self.clone()
-        };
-        generator.generate_files(request)
-    }
-
-    fn name(&self) -> &'static str {
-        "python"
-    }
-}
-
-impl PythonGenerator {
-    fn generate_files(&self, request: &CodeGenRequest) -> CodeGenResponse {
         let mut files = Vec::new();
         let prelude = request.options.get("prelude").and_then(|v| v.as_str());
 
@@ -606,6 +563,10 @@ impl PythonGenerator {
             files,
             errors: vec![],
         }
+    }
+
+    fn name(&self) -> &'static str {
+        "python"
     }
 }
 
@@ -810,9 +771,13 @@ mod tests {
     }
 
     #[test]
-    fn enum_map_keys_str_only_affects_string_enums() {
-        let out = module_file(serde_json::json!({ "enumMapKeys": "str" }));
-        assert!(out.contains("SEATS: Dict[str, int] = { Plan.FREE: 1, Plan.PRO_PLUS: 10 }"));
+    fn enums_get_a_parse_classmethod_typed_by_backing() {
+        let out = module_file(serde_json::json!({}));
+        assert!(out.contains("    def parse(cls, value: str) -> Optional[\"Plan\"]:"));
+        assert!(out.contains("    def parse(cls, value: int) -> Optional[\"Level\"]:"));
+        assert!(out.contains("        except ValueError:\n            return None\n"));
+        // Map annotations stay honest: keys are the enum, not `str`.
+        assert!(out.contains("SEATS: Dict[Plan, int] = { Plan.FREE: 1, Plan.PRO_PLUS: 10 }"));
         assert!(out.contains("LEVEL_RANK: Dict[Level, int] = "));
     }
 }

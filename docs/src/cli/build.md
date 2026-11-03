@@ -108,7 +108,6 @@ generator = "python"
 path      = "scripts/generated/constants/"
 options.typing = "runtime"           # or "stub" (emits a .pyi-style file)
 options.enumStyle = "str-mixin"      # or "strenum" (Python 3.11+)
-options.enumMapKeys = "enum"         # or "str"
 ```
 
 Durations become `timedelta`. Integer-backed enums become `IntEnum`
@@ -117,12 +116,21 @@ subclasses; string-tagged enums become `(str, Enum)` subclasses, or
 `str(Status.PENDING)` and f-strings give the value (`"pending"`) rather
 than `Status.PENDING`.
 
-Maps keyed by a string-backed enum are annotated `Dict[Plan, V]` by
-default. `enumMapKeys = "str"` annotates them `Dict[str, V]` instead, so a
-type checker accepts lookups by a plain string (`SEATS.get(name)`) when
-the key comes from outside, such as JSON or user input. The keys are still
-emitted as enum members, and primate still rejects keys that aren't
-variants. Maps keyed by an integer-backed enum are unaffected.
+Maps keyed by an enum are annotated `Dict[Plan, V]` and their keys are
+the enum members, so `SEATS[Plan.PRO_PLUS]` type-checks. When the key
+comes from outside the program (JSON, user input), convert it first
+rather than widening the annotation: `Plan(name)` raises `ValueError`
+for anything that isn't a variant, and every generated enum also has a
+non-raising `parse`:
+
+```python
+plan = Plan.parse(name)          # Optional[Plan]
+seats = SEATS[plan] if plan is not None else 0
+```
+
+Both work at runtime because `(str, Enum)` and `StrEnum` members are
+`str` instances, but the checker only accepts the lookup once the
+value has been narrowed to `Plan`.
 
 Float values always keep a decimal point (`f64 X = 5` emits `5.0`), so
 they are `float` at runtime.
