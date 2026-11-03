@@ -1,3 +1,4 @@
-# GitHub has no grammar for primate; the Rust grammar is a close match
-# (same comment, attribute, enum, generic and numeric syntax).
-*.prim linguist-language=Rust
+# GitHub has no grammar for primate; Zig's is the closest match
+# (same comment, enum, type-alias and generic syntax, and it colours
+# primitive types like u32 and PascalCase type names).
+*.prim linguist-language=Zig

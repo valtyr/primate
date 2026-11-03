@@ -65,16 +65,17 @@ namespace). See [`primate build`](./cli/build.md) for the rationale.
 
 ## Syntax highlighting on GitHub
 
-GitHub doesn't know the primate grammar, but Rust's is close enough:
-comments, `///` docs, `#[attributes]`, `enum`, `type`, `use`,
-generics, strings and numbers all render correctly. Tell GitHub to use
-it by adding one line to `.gitattributes` at the repo root:
+GitHub doesn't know the primate grammar, but Zig's is close enough:
+comments, `///` docs, `enum`, `type`, `use`, generics, primitive
+types, constants, strings and numbers all render correctly. Tell
+GitHub to use it by adding one line to `.gitattributes` at the repo
+root:
 
 ```gitattributes
-*.prim linguist-language=Rust
+*.prim linguist-language=Zig
 ```
 
-This also counts `.prim` files toward Rust in the repository's
+This also counts `.prim` files toward Zig in the repository's
 language statistics. If you'd rather they didn't, add
 `linguist-detectable=false` on the same line.
 

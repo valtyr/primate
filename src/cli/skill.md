@@ -104,8 +104,8 @@ Useful one-shots:
 
 ## Repo setup
 
-- GitHub has no primate grammar; Rust's is a close match. Make sure the
-  repo's `.gitattributes` contains `*.prim linguist-language=Rust` so
+- GitHub has no primate grammar; Zig's is a close match. Make sure the
+  repo's `.gitattributes` contains `*.prim linguist-language=Zig` so
   `.prim` files are syntax-highlighted in PRs and file views.
 
 ## Don't

@@ -526,9 +526,9 @@ fn print_next_steps(a: &Answers) {
     println!("  don't need primate installed and CI catches drift via");
     println!("  `git diff --exit-code` after `primate build`.");
     println!();
-    println!("  Tip: GitHub has no primate grammar, but Rust's is a close match.");
+    println!("  Tip: GitHub has no primate grammar, but Zig's is a close match.");
     println!("  Add this line to .gitattributes to get syntax highlighting:");
-    println!("    *.prim linguist-language=Rust");
+    println!("    *.prim linguist-language=Zig");
     println!();
 }
 
