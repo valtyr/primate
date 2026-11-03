@@ -167,8 +167,30 @@ map<string, u32> SERVICE_PORTS = {
 }
 ```
 
-Map keys can be strings, identifiers, or integers; the value type is
-arbitrary. Trailing comma triggers multi-line formatting (see
+The key type must be `string`, an integer type, or an enum; the value
+type is arbitrary. Keys are checked against the key type, so an
+enum-keyed map only accepts that enum's variants:
+
+```primate
+enum Plan {
+    Free    = "free",
+    ProPlus = "pro-plus",
+}
+
+map<Plan, u32> SEATS = {
+    Free:    1,
+    ProPlus: 10,
+}
+```
+
+Generated code is keyed by the enum member (`Plan.PRO_PLUS` in Python,
+`[Plan.ProPlus]` in TypeScript, `Plan::ProPlus` in Rust), so lookups by
+the enum's real value work. A key that is not a variant, a duplicate key,
+or a key of the wrong type is a compile error.
+
+Entries are emitted in source order on every run. Rust has no
+const-constructible hash map, so a map becomes a `&'static [(K, V)]`
+slice there. Trailing comma triggers multi-line formatting (see
 [Values](./values.md)).
 
 ### `tuple<A, B, …>`

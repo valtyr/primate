@@ -100,10 +100,16 @@ true                                                   // bool
 "hello"                                                // string
 { "nanoseconds": 30000000000 }                         // duration
 [1, 2, 3]                                              // array / fixed-array / tuple
-{ "key": value, ... }                                  // map (untagged JSON object)
+{ "key": value, ... }                                  // map (untagged JSON object, source order)
 null                                                   // optional, none case
 { "variant": "Info", "value": 1 }                      // enum
 ```
+
+Map keys are always JSON strings. For `map<u32, …>` the key is the decimal
+form of the integer; for an enum-keyed map it is the **variant name**
+(`"ProPlus"`, not `"pro-plus"`), so look it up in `enums` when you need
+the backing value. Entries appear in source order, and a plugin should
+preserve that order so its output is deterministic.
 
 Plugins typically deserialize into language-native types and re-serialize
 to the target syntax.
