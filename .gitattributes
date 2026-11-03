@@ -1,0 +1,3 @@
+# GitHub has no grammar for primate; the Rust grammar is a close match
+# (same comment, attribute, enum, generic and numeric syntax).
+*.prim linguist-language=Rust
