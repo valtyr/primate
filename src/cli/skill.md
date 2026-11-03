@@ -110,6 +110,12 @@ Useful one-shots:
 - `primate generate --watch` — interactive TUI watch mode (sessions only,
   not CI).
 
+## Repo setup
+
+- GitHub has no primate grammar; Zig's is a close match. Make sure the
+  repo's `.gitattributes` contains `*.prim linguist-language=Zig` so
+  `.prim` files are syntax-highlighted in PRs and file views.
+
 ## Don't
 
 - Use expressions or arithmetic in values (`60 * 60` doesn't parse).

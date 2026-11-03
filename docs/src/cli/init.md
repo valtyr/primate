@@ -69,7 +69,9 @@ The wizard prints a small "next steps" block — create the source
 directory, drop in a `.prim` file, run `primate build`. There's also
 a recommendation to **commit the generated files alongside source**:
 consumers don't need primate installed to use them, and CI can gate
-on `git diff --exit-code` after `primate build` to catch drift.
+on `git diff --exit-code` after `primate build` to catch drift. It also
+suggests the one-line `.gitattributes` entry that makes GitHub
+highlight `.prim` files (see [Getting started](../getting-started.md#syntax-highlighting-on-github)).
 
 ## See also
 
