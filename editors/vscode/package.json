@@ -44,7 +44,7 @@
         "primate.server.path": {
           "type": "string",
           "default": "primate",
-          "description": "Path to the primate executable. Defaults to 'primate' (must be in PATH)."
+          "description": "Path to the primate executable. Supports `~` and `${workspaceFolder}`. When left as 'primate', the extension searches PATH, your login shell's PATH (so mise/asdf/direnv-managed installs work), `mise which primate`, and common install directories (~/.cargo/bin, Homebrew, shims)."
         }
       }
     },

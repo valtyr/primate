@@ -4,6 +4,8 @@ import {
   window,
   commands,
   languages,
+  env,
+  OutputChannel,
   Uri,
   Position,
   Location,
@@ -26,7 +28,20 @@ import {
   Location as LSPLocation,
 } from "vscode-languageclient/node";
 
-let client: LanguageClient;
+import { spawnSync } from "child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+
+let client: LanguageClient | undefined;
+let logChannel: OutputChannel | undefined;
+
+function getLog(): OutputChannel {
+  if (!logChannel) logChannel = window.createOutputChannel("primate LSP");
+  return logChannel;
+}
+
+const INSTALL_DOCS = "https://valtyr.github.io/primate/editors/vscode.html";
 
 // Custom requests primate's LSP exposes for source-mapped navigation between
 // .prim files and the generated targets (e.g. jump from `LogLevel.Info` in a
@@ -54,10 +69,199 @@ const ResolveSourceLocationRequest = new RequestType<
 // Languages we walk when chasing a generated symbol back to its `.prim` source.
 const GENERATED_LANGUAGES = ["typescript", "javascript", "rust", "python"];
 
-export function activate(context: ExtensionContext) {
+/**
+ * Locate the `primate` executable.
+ *
+ * VS Code is often launched from a dock or launcher with a minimal PATH, so
+ * `primate` installed by cargo, mise, asdf, Homebrew, etc. is frequently not
+ * visible to the extension host even though it works in the user's terminal.
+ * We therefore try, in order:
+ *
+ *   1. `primate.server.path` if the user set it (supports `~` and
+ *      `${workspaceFolder}`).
+ *   2. The extension host's own PATH.
+ *   3. The user's login+interactive shell PATH (`$SHELL -ilc 'command -v …'`),
+ *      run from the workspace folder so per-project tool managers such as
+ *      mise/asdf/direnv resolve the project's version.
+ *   4. `mise which primate`, in case mise is installed but not activated in
+ *      the shell rc files.
+ *   5. Well-known install directories (cargo, mise/asdf/proto shims,
+ *      Homebrew, ~/.local/bin, nix).
+ */
+export function resolvePrimateBinary(): string | undefined {
   const config = workspace.getConfiguration("primate");
-  const serverPath = config.get<string>("server.path") || "primate";
+  const configured = (config.get<string>("server.path") || "").trim();
+  const workspaceDir = workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const home = os.homedir();
+  const exe = process.platform === "win32" ? "primate.exe" : "primate";
 
+  const expand = (p: string): string => {
+    let out = p;
+    if (out.startsWith("~")) out = path.join(home, out.slice(1));
+    if (workspaceDir) out = out.replace(/\$\{workspaceFolder\}/g, workspaceDir);
+    return out;
+  };
+
+  const isExecutable = (p: string): boolean => {
+    try {
+      fs.accessSync(p, fs.constants.X_OK);
+      return fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  };
+
+  const findOnPath = (name: string, pathVar: string | undefined): string | undefined => {
+    if (!pathVar) return undefined;
+    const exts =
+      process.platform === "win32"
+        ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";").concat([""])
+        : [""];
+    for (const dir of pathVar.split(path.delimiter)) {
+      if (!dir) continue;
+      for (const ext of exts) {
+        const candidate = path.join(dir, name + ext);
+        if (isExecutable(candidate)) return candidate;
+      }
+    }
+    return undefined;
+  };
+
+  const log = getLog();
+  const run = (
+    cmd: string,
+    args: string[],
+    label: string,
+  ): string | undefined => {
+    try {
+      const r = spawnSync(cmd, args, {
+        cwd: workspaceDir,
+        timeout: 5000,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const out = (r.stdout || "").trim().split(/\r?\n/).pop() || "";
+      if (r.status === 0 && out && isExecutable(out)) return out;
+      log.appendLine(
+        `  ${label}: no result (exit ${r.status}${r.error ? ", " + r.error.message : ""})`,
+      );
+    } catch (e) {
+      log.appendLine(`  ${label}: ${e}`);
+    }
+    return undefined;
+  };
+
+  log.appendLine("Resolving primate binary…");
+
+  // 1. Explicit setting. A bare name is treated as something to search for;
+  //    anything with a path separator is used as-is.
+  let name = exe;
+  if (configured && configured !== "primate") {
+    const expanded = expand(configured);
+    if (expanded.includes(path.sep) || expanded.includes("/")) {
+      if (isExecutable(expanded)) {
+        log.appendLine(`  using primate.server.path: ${expanded}`);
+        return expanded;
+      }
+      log.appendLine(
+        `  primate.server.path is set to ${expanded} but it is not an executable file`,
+      );
+      return undefined;
+    }
+    name = expanded;
+  }
+
+  // 2. Our own PATH.
+  const onPath = findOnPath(name, process.env.PATH);
+  if (onPath) {
+    log.appendLine(`  found on PATH: ${onPath}`);
+    return onPath;
+  }
+
+  // 3. The user's shell. mise/asdf/direnv activation normally lives in the
+  //    interactive rc file, so ask a login + interactive shell.
+  if (process.platform !== "win32") {
+    const shell = process.env.SHELL || "/bin/sh";
+    const found = run(
+      shell,
+      ["-ilc", `command -v '${name.replace(/'/g, "'\\''")}' 2>/dev/null`],
+      `shell (${shell})`,
+    );
+    if (found) {
+      log.appendLine(`  found via login shell: ${found}`);
+      return found;
+    }
+  }
+
+  // 4. mise directly, for installs where mise isn't activated in the shell.
+  const miseCandidates = [
+    findOnPath("mise", process.env.PATH),
+    path.join(home, ".local", "bin", "mise"),
+    "/opt/homebrew/bin/mise",
+    "/usr/local/bin/mise",
+    path.join(home, ".cargo", "bin", "mise"),
+  ].filter((p): p is string => !!p && isExecutable(p));
+  for (const mise of miseCandidates) {
+    const found = run(mise, ["which", name], `mise (${mise})`);
+    if (found) {
+      log.appendLine(`  found via mise: ${found}`);
+      return found;
+    }
+    break; // one working mise is enough to ask
+  }
+
+  // 5. Well-known install locations and tool-manager shim directories.
+  const xdgData = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  const miseData = process.env.MISE_DATA_DIR || path.join(xdgData, "mise");
+  const asdfDir = process.env.ASDF_DATA_DIR || path.join(home, ".asdf");
+  const dirs = [
+    path.join(home, ".cargo", "bin"),
+    path.join(miseData, "shims"),
+    path.join(asdfDir, "shims"),
+    path.join(process.env.PROTO_HOME || path.join(home, ".proto"), "shims"),
+    path.join(home, ".local", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/home/linuxbrew/.linuxbrew/bin",
+    path.join(home, ".nix-profile", "bin"),
+    "/run/current-system/sw/bin",
+  ];
+  for (const dir of dirs) {
+    const candidate = path.join(dir, name);
+    if (isExecutable(candidate)) {
+      log.appendLine(`  found in ${dir}: ${candidate}`);
+      return candidate;
+    }
+  }
+
+  log.appendLine("  primate not found");
+  return undefined;
+}
+
+function showNotFound(): void {
+  const settings = "Open Settings";
+  const docs = "Install Instructions";
+  const output = "Show Log";
+  window
+    .showErrorMessage(
+      "primate: could not find the `primate` executable. Install it " +
+        "(e.g. `cargo install primate --locked`), or set `primate.server.path`.",
+      settings,
+      docs,
+      output,
+    )
+    .then((choice) => {
+      if (choice === settings) {
+        commands.executeCommand("workbench.action.openSettings", "primate.server.path");
+      } else if (choice === docs) {
+        env.openExternal(Uri.parse(INSTALL_DOCS));
+      } else if (choice === output) {
+        getLog().show();
+      }
+    });
+}
+
+function buildClient(serverPath: string): LanguageClient {
   const run: Executable = {
     command: serverPath,
     args: ["lsp"],
@@ -86,15 +290,31 @@ export function activate(context: ExtensionContext) {
         workspace.createFileSystemWatcher("**/primate.toml"),
       ],
     },
-    outputChannelName: "primate LSP",
+    outputChannel: getLog(),
   };
 
-  client = new LanguageClient(
-    "primate",
-    "primate LSP",
-    serverOptions,
-    clientOptions,
-  );
+  return new LanguageClient("primate", "primate LSP", serverOptions, clientOptions);
+}
+
+/** Resolve the binary and (re)start the client. Returns false if not found. */
+async function startClient(): Promise<boolean> {
+  const serverPath = resolvePrimateBinary();
+  if (!serverPath) {
+    showNotFound();
+    return false;
+  }
+  client = buildClient(serverPath);
+  try {
+    await client.start();
+  } catch (e) {
+    window.showErrorMessage(`primate LSP failed to start (${serverPath}): ${e}`);
+    return false;
+  }
+  return true;
+}
+
+export function activate(context: ExtensionContext) {
+  context.subscriptions.push(getLog());
 
   // Cross-target navigation. `provideReferences` jumps from a constant in a
   // .prim file to its generated-target callsites; `provideDefinition` does the
@@ -110,25 +330,26 @@ export function activate(context: ExtensionContext) {
     ),
   );
 
-  client
-    .start()
-    .catch((e) =>
-      window.showErrorMessage(`primate LSP failed to start: ${e}`),
-    );
+  void startClient();
 
+  // Re-resolve the binary on restart so a fresh install or a changed
+  // `primate.server.path` is picked up without reloading the window.
   context.subscriptions.push(
     commands.registerCommand("primate.restartServer", async () => {
       try {
-        await client.stop();
+        await client?.stop();
       } catch {
         // ignore — we're about to restart it
       }
-      client
-        .start()
-        .catch((e) =>
-          window.showErrorMessage(`primate LSP failed to restart: ${e}`),
-        );
-      window.showInformationMessage("primate LSP server restarted");
+      client = undefined;
+      if (await startClient()) {
+        window.showInformationMessage("primate LSP server restarted");
+      }
+    }),
+    workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("primate.server.path")) {
+        commands.executeCommand("primate.restartServer");
+      }
     }),
   );
 }

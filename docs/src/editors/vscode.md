@@ -14,9 +14,13 @@ in the project repo.
    cargo install primate --locked
    ```
 
-   The binary lands at `~/.cargo/bin/primate`. As long as that's on
-   your `PATH`, you're set. If you'd rather point the extension at a
-   custom path, set `primate.server.path` in your VS Code settings.
+   Any install method works: `cargo install`, mise, asdf, Homebrew, or
+   a binary dropped in `~/.local/bin`. The extension looks for
+   `primate` on its own `PATH`, then in your login shell's `PATH`
+   (so tool managers activated in your shell rc are honoured), then
+   via `mise which primate`, then in the usual install directories.
+   To point it at a specific binary, set `primate.server.path`; it
+   accepts `~` and `${workspaceFolder}`.
 
 2. Install the extension from the Marketplace:
 
@@ -43,7 +47,7 @@ in the project repo.
 
 | Setting               | Default     | Description                                                    |
 | --------------------- | ----------- | -------------------------------------------------------------- |
-| `primate.server.path` | `"primate"` | Path to the `primate` executable. Defaults to looking on PATH. |
+| `primate.server.path` | `"primate"` | Path to the `primate` executable. Supports `~` and `${workspaceFolder}`. Left at the default, the extension searches PATH, your login shell's PATH, `mise which primate`, and common install directories. |
 
 ## Commands
 
@@ -56,9 +60,14 @@ If the extension activates but diagnostics never show, the language
 server probably failed to start. Check **Output** panel → **primate
 LSP** for the error message. Common causes:
 
-- `primate` isn't on `PATH`. Run `which primate` from a terminal; if
-  empty, either `cargo install primate --locked` or set
-  `primate.server.path` to an absolute path.
+- `primate` can't be found. The **primate LSP** output channel logs
+  every location the extension tried. If `which primate` works in
+  your terminal but the extension still fails, your shell's `PATH`
+  setup probably only runs for interactive shells that the extension
+  couldn't reproduce; set `primate.server.path` to the path `which
+  primate` prints (or to `~/.local/share/mise/shims/primate` for a
+  mise-managed install). After installing or changing the setting,
+  run **primate: Restart LSP Server**; no window reload is needed.
 - The CLI version doesn't match the extension. Run
   `primate --version` to confirm. Older CLIs may not implement
   some LSP requests the extension expects (e.g. cross-target
