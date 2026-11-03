@@ -81,6 +81,14 @@ Containers: `array<T>` (or `T[]`), `array<T, N>` fixed-size, `optional<T>`
 (or `T?`), `tuple<A, B>`, `map<K, V>`. Tuple/array values use `[…]`, not
 `(…)`.
 
+Maps: `K` must be `string`, an integer type, or an enum. Enum keys are
+written as bare variant names and are validated; duplicate keys are an
+error. Output keeps source order.
+
+```primate
+map<Plan, u32> SEATS = { Free: 1, ProPlus: 10 }
+```
+
 `///` doc comments attach to the next declaration and propagate to
 generated output.
 

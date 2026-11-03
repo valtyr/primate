@@ -8,7 +8,10 @@ use super::Generator;
 use crate::ir::{
     CodeGenRequest, CodeGenResponse, EnumDef, GeneratedFile, Module, SymbolMapping, TypeAliasDef,
 };
-use crate::types::{Type, Value, resolve_alias, to_pascal_case, to_screaming_snake_case};
+use crate::types::{
+    Type, Value, map_key_value, resolve_alias, to_pascal_case, to_screaming_snake_case,
+};
+use indexmap::IndexMap;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 struct LineTracker {
@@ -189,13 +192,21 @@ impl PythonGenerator {
                 format!("[{}]", items.join(", "))
             }
             Value::Map(map) => {
-                let val_type = match typ {
-                    Type::Map { value, .. } => value.as_ref(),
-                    _ => &Type::String,
+                let (key_type, val_type) = match typ {
+                    Type::Map { key, value } => (key.as_ref(), value.as_ref()),
+                    _ => (&Type::String, &Type::String),
                 };
+                // Entries are emitted in source order; enum keys become
+                // enum members so lookups by `Plan.PRO_PLUS` work.
                 let entries: Vec<_> = map
                     .iter()
-                    .map(|(k, v)| format!("\"{}\": {}", k, self.generate_value(v, val_type)))
+                    .map(|(k, v)| {
+                        format!(
+                            "{}: {}",
+                            self.generate_value(&map_key_value(k, key_type), key_type),
+                            self.generate_value(v, val_type)
+                        )
+                    })
                     .collect();
                 format!("{{ {} }}", entries.join(", "))
             }
@@ -232,7 +243,7 @@ impl PythonGenerator {
             Value::Struct(fields) => {
                 let field_types = match typ {
                     Type::Struct { fields } => fields.clone(),
-                    _ => HashMap::new(),
+                    _ => IndexMap::new(),
                 };
                 let entries: Vec<_> = fields
                     .iter()
@@ -511,5 +522,83 @@ impl Generator for PythonGenerator {
 
     fn name(&self) -> &'static str {
         "python"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seats_map() -> (Value, Type) {
+        let mut map = indexmap::IndexMap::new();
+        map.insert("Free".to_string(), Value::Integer(1));
+        map.insert("ProPlus".to_string(), Value::Integer(10));
+        (
+            Value::Map(map),
+            Type::Map {
+                key: Box::new(Type::Enum {
+                    name: "Plan".into(),
+                    namespace: "t".into(),
+                }),
+                value: Box::new(Type::U32),
+            },
+        )
+    }
+
+    fn ordered_map() -> (Value, Type) {
+        let mut map = indexmap::IndexMap::new();
+        for (i, k) in ["golf", "alpha", "bravo", "echo"].iter().enumerate() {
+            map.insert(k.to_string(), Value::Integer(i as i128));
+        }
+        (
+            Value::Map(map),
+            Type::Map {
+                key: Box::new(Type::String),
+                value: Box::new(Type::U32),
+            },
+        )
+    }
+
+    fn int_keyed_map() -> (Value, Type) {
+        let mut map = indexmap::IndexMap::new();
+        map.insert("404".to_string(), Value::String("missing".into()));
+        map.insert("200".to_string(), Value::String("ok".into()));
+        (
+            Value::Map(map),
+            Type::Map {
+                key: Box::new(Type::U32),
+                value: Box::new(Type::String),
+            },
+        )
+    }
+
+    #[test]
+    fn map_entries_in_source_order() {
+        let generator = PythonGenerator::default();
+        let (v, t) = ordered_map();
+        assert_eq!(
+            generator.generate_value(&v, &t),
+            "{ \"golf\": 0, \"alpha\": 1, \"bravo\": 2, \"echo\": 3 }"
+        );
+    }
+
+    #[test]
+    fn map_enum_keys_are_enum_members() {
+        let generator = PythonGenerator::default();
+        let (v, t) = seats_map();
+        assert_eq!(
+            generator.generate_value(&v, &t),
+            "{ Plan.FREE: 1, Plan.PRO_PLUS: 10 }"
+        );
+    }
+
+    #[test]
+    fn map_integer_keys_are_numbers() {
+        let generator = PythonGenerator::default();
+        let (v, t) = int_keyed_map();
+        assert_eq!(
+            generator.generate_value(&v, &t),
+            "{ 404: \"missing\", 200: \"ok\" }"
+        );
     }
 }

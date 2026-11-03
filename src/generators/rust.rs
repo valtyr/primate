@@ -9,9 +9,10 @@ use crate::ir::{
     CodeGenRequest, CodeGenResponse, EnumDef, GeneratedFile, Module, SymbolMapping, TypeAliasDef,
 };
 use crate::types::{
-    RUST_KEYWORDS, Type, Value, escape_keyword, resolve_alias, to_pascal_case,
+    RUST_KEYWORDS, Type, Value, escape_keyword, map_key_value, resolve_alias, to_pascal_case,
     to_screaming_snake_case,
 };
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 const INDENT: &str = "    ";
@@ -133,7 +134,13 @@ impl RustGenerator {
             Type::FixedArray { element, length } => {
                 format!("[{}; {}]", self.generate_type(element, current_ns), length)
             }
-            Type::Map { .. } => "&'static [(&'static str, &'static str)]".to_string(),
+            // Maps are a static slice of `(key, value)` pairs in source
+            // order; Rust has no const-constructible hash map.
+            Type::Map { key, value } => format!(
+                "&'static [({}, {})]",
+                self.generate_type(key, current_ns),
+                self.generate_type(value, current_ns)
+            ),
             Type::Tuple { elements } => {
                 let types: Vec<_> = elements
                     .iter()
@@ -191,7 +198,23 @@ impl RustGenerator {
                 };
                 format!("{}[{}]", prefix, items.join(", "))
             }
-            Value::Map(_) => "&[]".to_string(),
+            Value::Map(map) => {
+                let (key_type, val_type) = match typ {
+                    Type::Map { key, value } => (key.as_ref(), value.as_ref()),
+                    _ => (&Type::String, &Type::String),
+                };
+                let entries: Vec<_> = map
+                    .iter()
+                    .map(|(k, v)| {
+                        format!(
+                            "({}, {})",
+                            self.generate_value(&map_key_value(k, key_type), key_type, current_ns),
+                            self.generate_value(v, val_type, current_ns)
+                        )
+                    })
+                    .collect();
+                format!("&[{}]", entries.join(", "))
+            }
             Value::Tuple(vals) => {
                 let elem_types = match typ {
                     Type::Tuple { elements } => elements.clone(),
@@ -224,7 +247,7 @@ impl RustGenerator {
             Value::Struct(fields) => {
                 let field_types = match typ {
                     Type::Struct { fields: f } => f.clone(),
-                    _ => HashMap::new(),
+                    _ => IndexMap::new(),
                 };
                 let mut field_list: Vec<_> = fields.iter().collect();
                 field_list.sort_by_key(|(k, _)| k.as_str());
@@ -510,5 +533,90 @@ impl Generator for RustGenerator {
 
     fn name(&self) -> &'static str {
         "rust"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seats_map() -> (Value, Type) {
+        let mut map = indexmap::IndexMap::new();
+        map.insert("Free".to_string(), Value::Integer(1));
+        map.insert("ProPlus".to_string(), Value::Integer(10));
+        (
+            Value::Map(map),
+            Type::Map {
+                key: Box::new(Type::Enum {
+                    name: "Plan".into(),
+                    namespace: "t".into(),
+                }),
+                value: Box::new(Type::U32),
+            },
+        )
+    }
+
+    fn ordered_map() -> (Value, Type) {
+        let mut map = indexmap::IndexMap::new();
+        for (i, k) in ["golf", "alpha", "bravo", "echo"].iter().enumerate() {
+            map.insert(k.to_string(), Value::Integer(i as i128));
+        }
+        (
+            Value::Map(map),
+            Type::Map {
+                key: Box::new(Type::String),
+                value: Box::new(Type::U32),
+            },
+        )
+    }
+
+    fn int_keyed_map() -> (Value, Type) {
+        let mut map = indexmap::IndexMap::new();
+        map.insert("404".to_string(), Value::String("missing".into()));
+        map.insert("200".to_string(), Value::String("ok".into()));
+        (
+            Value::Map(map),
+            Type::Map {
+                key: Box::new(Type::U32),
+                value: Box::new(Type::String),
+            },
+        )
+    }
+
+    #[test]
+    fn map_is_a_typed_slice_of_pairs() {
+        // Maps used to be typed `&[(&str, &str)]` and emitted as `&[]`,
+        // dropping every entry.
+        let generator = RustGenerator::default();
+        let (v, t) = ordered_map();
+        assert_eq!(
+            generator.generate_type(&t, "t"),
+            "&'static [(&'static str, u32)]"
+        );
+        assert_eq!(
+            generator.generate_value(&v, &t, "t"),
+            "&[(\"golf\", 0), (\"alpha\", 1), (\"bravo\", 2), (\"echo\", 3)]"
+        );
+    }
+
+    #[test]
+    fn map_enum_keys_are_enum_paths() {
+        let generator = RustGenerator::default();
+        let (v, t) = seats_map();
+        assert_eq!(generator.generate_type(&t, "t"), "&'static [(Plan, u32)]");
+        assert_eq!(
+            generator.generate_value(&v, &t, "t"),
+            "&[(Plan::Free, 1), (Plan::ProPlus, 10)]"
+        );
+    }
+
+    #[test]
+    fn map_integer_keys_are_numbers() {
+        let generator = RustGenerator::default();
+        let (v, t) = int_keyed_map();
+        assert_eq!(
+            generator.generate_value(&v, &t, "t"),
+            "&[(404, \"missing\"), (200, \"ok\")]"
+        );
     }
 }

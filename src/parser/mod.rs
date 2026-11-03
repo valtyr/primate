@@ -545,4 +545,185 @@ mod tests {
             p.diagnostics
         );
     }
+
+    fn error_codes(p: &ParsedProject) -> Vec<String> {
+        p.diagnostics
+            .diagnostics
+            .iter()
+            .map(|d| d.code.clone())
+            .collect()
+    }
+
+    #[test]
+    fn map_entries_keep_source_order() {
+        // Regression for #12: `Value::Map` used to be a `HashMap`, so the
+        // generators emitted entries in a different order on every run.
+        let src = "map<string, u32> RATE_LIMITS = {\n    \"alpha\": 1,\n    \"bravo\": 2,\n    \"charlie\": 3,\n    \"delta\": 4,\n    \"echo\": 5,\n    \"foxtrot\": 6,\n    \"golf\": 7,\n    \"hotel\": 8,\n}\n";
+        for _ in 0..5 {
+            let p = parse_one("t.prim", "t", src);
+            assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
+            let crate::types::Value::Map(map) = &p.modules[0].constants[0].value else {
+                panic!("expected a map value");
+            };
+            let keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
+            assert_eq!(
+                keys,
+                [
+                    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn map_enum_keys_resolve_to_variants() {
+        // Regression for #13: enum-keyed maps are validated against the
+        // enum and stored by variant name.
+        let p = parse_one(
+            "t.prim",
+            "t",
+            "enum Plan {\n    Free = \"free\",\n    ProPlus = \"pro-plus\",\n}\nmap<Plan, u32> SEATS = {\n    Free: 1,\n    ProPlus: 10,\n}\n",
+        );
+        assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
+        let crate::types::Value::Map(map) = &p.modules[0].constants[0].value else {
+            panic!("expected a map value");
+        };
+        let keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
+        assert_eq!(keys, ["Free", "ProPlus"]);
+        assert!(matches!(
+            &p.modules[0].constants[0].typ,
+            crate::types::Type::Map { key, .. } if matches!(**key, crate::types::Type::Enum { .. })
+        ));
+    }
+
+    #[test]
+    fn map_enum_key_rejects_unknown_variant_and_string_literal() {
+        let p = parse_one(
+            "t.prim",
+            "t",
+            "enum Plan {\n    Free = \"free\",\n    ProPlus = \"pro-plus\",\n}\nmap<Plan, u32> SEATS = {\n    Free: 1,\n    Typo: 5,\n    \"not-a-plan\": 7,\n    \"pro-plus\": 9,\n}\n",
+        );
+        assert!(p.diagnostics.has_errors());
+        let codes = error_codes(&p);
+        // One error per bad key, and the good key doesn't mask them.
+        assert_eq!(
+            codes
+                .iter()
+                .filter(|c| *c == "invalid-enum-variant")
+                .count(),
+            3,
+            "{:?}",
+            p.diagnostics
+        );
+        // A string literal that matches a variant's value gets a hint.
+        assert!(
+            p.diagnostics
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("did you mean `ProPlus`")),
+            "{:?}",
+            p.diagnostics
+        );
+        assert!(p.modules.is_empty() || p.modules[0].constants.is_empty());
+    }
+
+    #[test]
+    fn map_enum_key_int_backed() {
+        let p = parse_one(
+            "t.prim",
+            "t",
+            "enum Level: u8 {\n    Low = 1,\n    High = 2,\n}\nmap<Level, string> NAMES = {\n    Low: \"low\",\n    High: \"high\",\n}\n",
+        );
+        assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
+        let crate::types::Value::Map(map) = &p.modules[0].constants[0].value else {
+            panic!("expected a map value");
+        };
+        assert_eq!(map.keys().collect::<Vec<_>>(), ["Low", "High"]);
+    }
+
+    #[test]
+    fn map_duplicate_key_is_an_error() {
+        let p = parse_one(
+            "t.prim",
+            "t",
+            "map<string, u32> PORTS = {\n    \"http\": 80,\n    \"http\": 8080,\n}\n",
+        );
+        assert!(
+            error_codes(&p).contains(&"duplicate-key".to_string()),
+            "{:?}",
+            p.diagnostics
+        );
+    }
+
+    #[test]
+    fn map_integer_keys_are_typed_and_range_checked() {
+        let p = parse_one(
+            "t.prim",
+            "t",
+            "map<u32, string> CODES = {\n    200: \"ok\",\n    404: \"missing\",\n}\n",
+        );
+        assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
+        let crate::types::Value::Map(map) = &p.modules[0].constants[0].value else {
+            panic!("expected a map value");
+        };
+        assert_eq!(map.keys().collect::<Vec<_>>(), ["200", "404"]);
+
+        let p = parse_one(
+            "t.prim",
+            "t",
+            "map<u32, string> CODES = {\n    5000000000: \"too-big\",\n}\n",
+        );
+        assert!(
+            error_codes(&p).contains(&"out-of-range".to_string()),
+            "{:?}",
+            p.diagnostics
+        );
+
+        let p = parse_one(
+            "t.prim",
+            "t",
+            "map<u32, string> CODES = {\n    \"x\": \"neg\",\n}\n",
+        );
+        assert!(
+            error_codes(&p).contains(&"type-mismatch".to_string()),
+            "{:?}",
+            p.diagnostics
+        );
+
+        let p = parse_one("t.prim", "t", "map<string, u32> PORTS = {\n    5: 1,\n}\n");
+        assert!(
+            error_codes(&p).contains(&"type-mismatch".to_string()),
+            "{:?}",
+            p.diagnostics
+        );
+    }
+
+    #[test]
+    fn map_unsupported_key_type() {
+        let p = parse_one("t.prim", "t", "map<bool, u32> FLAGS = {\n    yes: 1,\n}\n");
+        assert!(
+            error_codes(&p).contains(&"unsupported-key-type".to_string()),
+            "{:?}",
+            p.diagnostics
+        );
+    }
+
+    #[test]
+    fn int_backed_enum_value_carries_backing_integer() {
+        // The IR used to store a placeholder `0` for every int-backed enum
+        // value; plugins reading `value` got the wrong number.
+        let p = parse_one(
+            "t.prim",
+            "t",
+            "enum Level: u8 {\n    Low = 1,\n    High = 7,\n}\nLevel DEFAULT = High\n",
+        );
+        assert!(!p.diagnostics.has_errors(), "{:?}", p.diagnostics);
+        assert_eq!(
+            p.modules[0].constants[0].value,
+            crate::types::Value::Enum {
+                variant: "High".into(),
+                value: Box::new(crate::types::Value::Integer(7)),
+            }
+        );
+    }
 }
