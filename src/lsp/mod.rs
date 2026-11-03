@@ -2291,7 +2291,7 @@ mod tests {
         std::fs::write(&doc, "u32 X = 1\n").unwrap();
 
         assert_eq!(
-            find_config_upward(&doc, "primate.toml", &[ws.clone()]),
+            find_config_upward(&doc, "primate.toml", std::slice::from_ref(&ws)),
             None
         );
         assert_eq!(
