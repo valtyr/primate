@@ -2,6 +2,7 @@
 //!
 //! Defines all supported types and their parsing/normalization.
 
+use indexmap::IndexMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -85,7 +86,7 @@ pub enum Type {
     // r[impl type.struct.explicit]
     Struct {
         // r[impl ir.type.struct]
-        fields: HashMap<std::string::String, Type>,
+        fields: IndexMap<std::string::String, Type>,
     },
     /// A user-defined type alias reference. Generators emit this as the bare
     /// alias name; the alias declaration itself comes from `CodeGenRequest::aliases`.
@@ -122,7 +123,12 @@ pub enum Value {
 
     // Containers
     Array(Vec<Value>),
-    Map(HashMap<std::string::String, Value>),
+    /// Map entries in source order. Keys are stored as strings regardless
+    /// of the declared key type: integer keys are their decimal form and
+    /// enum keys are the variant name (generators resolve the variant via
+    /// the accompanying `Type::Map { key: Type::Enum { .. } }`). Insertion
+    /// order is preserved so generated output is deterministic.
+    Map(IndexMap<std::string::String, Value>),
     Tuple(Vec<Value>),
     Optional(Option<Box<Value>>),
 
@@ -133,7 +139,25 @@ pub enum Value {
         value: Box<Value>,
     },
     // r[impl ir.value.struct]
-    Struct(HashMap<std::string::String, Value>),
+    Struct(IndexMap<std::string::String, Value>),
+}
+
+/// Rebuild the typed `Value` for a `Value::Map` key from its stored string
+/// form, using the map's declared key type. Generators route the result
+/// through their ordinary `generate_value` so enum keys come out as enum
+/// members (`Plan.PRO_PLUS`, `Plan::ProPlus`) and integer keys as numbers.
+pub fn map_key_value(key: &str, key_type: &Type) -> Value {
+    match key_type {
+        Type::Enum { .. } => Value::Enum {
+            variant: key.to_string(),
+            value: Box::new(Value::String(key.to_string())),
+        },
+        Type::I32 | Type::I64 | Type::U32 | Type::U64 => key
+            .parse::<i128>()
+            .map(Value::Integer)
+            .unwrap_or_else(|_| Value::String(key.to_string())),
+        _ => Value::String(key.to_string()),
+    }
 }
 
 /// Parse a type string into a Type
@@ -163,7 +187,7 @@ pub fn parse_type(s: &str) -> Result<Type, TypeError> {
         // Struct type - fields will be inferred from value or explicit fields attribute
         "struct" => {
             return Ok(Type::Struct {
-                fields: HashMap::new(),
+                fields: IndexMap::new(),
             });
         }
         _ => {}

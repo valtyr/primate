@@ -140,8 +140,18 @@ map<string, u32> PORTS = {
 }
 ```
 
-Map keys can be strings, bare identifiers (treated as strings), or
-integers.
+Keys are written as strings, bare identifiers, or integers, and must
+match the declared key type:
+
+- `map<string, …>` — string literals, or bare identifiers (treated as
+  strings).
+- `map<u32, …>` and other integer types — integer literals,
+  range-checked like any other integer value.
+- `map<SomeEnum, …>` — bare variant names (`ProPlus`, not `"pro-plus"`).
+  Anything that isn't a variant of the enum is an error.
+
+Duplicate keys are an error. Entries keep their source order in the
+generated output.
 
 ## Magic trailing comma
 

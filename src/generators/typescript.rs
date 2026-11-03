@@ -9,8 +9,10 @@ use crate::ir::{
     CodeGenRequest, CodeGenResponse, EnumDef, GeneratedFile, Module, SymbolMapping, TypeAliasDef,
 };
 use crate::types::{
-    TS_KEYWORDS, Type, Value, escape_keyword, resolve_alias, to_camel_case, to_pascal_case,
+    TS_KEYWORDS, Type, Value, escape_keyword, map_key_value, resolve_alias, to_camel_case,
+    to_pascal_case,
 };
+use indexmap::IndexMap;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 struct LineTracker {
@@ -258,13 +260,24 @@ impl TypeScriptGenerator {
                 format!("[{}]", items.join(", "))
             }
             Value::Map(map) => {
-                let val_type = match typ {
-                    Type::Map { value, .. } => value.as_ref(),
-                    _ => &Type::String,
+                let (key_type, val_type) = match typ {
+                    Type::Map { key, value } => (key.as_ref(), value.as_ref()),
+                    _ => (&Type::String, &Type::String),
                 };
+                // Entries are emitted in source order. Enum keys are computed
+                // property names (`[Plan.ProPlus]: 10`) so the object is keyed
+                // by the enum's runtime values whichever enum style is in use.
                 let entries: Vec<_> = map
                     .iter()
-                    .map(|(k, v)| format!("\"{}\": {}", k, self.generate_value(v, val_type)))
+                    .map(|(k, v)| {
+                        let key = self.generate_value(&map_key_value(k, key_type), key_type);
+                        let key = if matches!(key_type, Type::Enum { .. }) {
+                            format!("[{}]", key)
+                        } else {
+                            key
+                        };
+                        format!("{}: {}", key, self.generate_value(v, val_type))
+                    })
                     .collect();
                 format!("{{ {} }}", entries.join(", "))
             }
@@ -304,7 +317,7 @@ impl TypeScriptGenerator {
             Value::Struct(fields) => {
                 let field_types = match typ {
                     Type::Struct { fields } => fields.clone(),
-                    _ => HashMap::new(),
+                    _ => IndexMap::new(),
                 };
                 let entries: Vec<_> = fields
                     .iter()
@@ -602,6 +615,79 @@ impl Generator for TypeScriptGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn seats_map() -> (Value, Type) {
+        let mut map = indexmap::IndexMap::new();
+        map.insert("Free".to_string(), Value::Integer(1));
+        map.insert("ProPlus".to_string(), Value::Integer(10));
+        (
+            Value::Map(map),
+            Type::Map {
+                key: Box::new(Type::Enum {
+                    name: "Plan".into(),
+                    namespace: "t".into(),
+                }),
+                value: Box::new(Type::U32),
+            },
+        )
+    }
+
+    fn ordered_map() -> (Value, Type) {
+        let mut map = indexmap::IndexMap::new();
+        for (i, k) in ["golf", "alpha", "bravo", "echo"].iter().enumerate() {
+            map.insert(k.to_string(), Value::Integer(i as i128));
+        }
+        (
+            Value::Map(map),
+            Type::Map {
+                key: Box::new(Type::String),
+                value: Box::new(Type::U32),
+            },
+        )
+    }
+
+    fn int_keyed_map() -> (Value, Type) {
+        let mut map = indexmap::IndexMap::new();
+        map.insert("404".to_string(), Value::String("missing".into()));
+        map.insert("200".to_string(), Value::String("ok".into()));
+        (
+            Value::Map(map),
+            Type::Map {
+                key: Box::new(Type::U32),
+                value: Box::new(Type::String),
+            },
+        )
+    }
+
+    #[test]
+    fn map_entries_in_source_order() {
+        let generator = TypeScriptGenerator::default();
+        let (v, t) = ordered_map();
+        assert_eq!(
+            generator.generate_value(&v, &t),
+            "{ \"golf\": 0, \"alpha\": 1, \"bravo\": 2, \"echo\": 3 }"
+        );
+    }
+
+    #[test]
+    fn map_enum_keys_are_computed_members() {
+        let generator = TypeScriptGenerator::default();
+        let (v, t) = seats_map();
+        assert_eq!(
+            generator.generate_value(&v, &t),
+            "{ [Plan.Free]: 1, [Plan.ProPlus]: 10 }"
+        );
+    }
+
+    #[test]
+    fn map_integer_keys_are_numbers() {
+        let generator = TypeScriptGenerator::default();
+        let (v, t) = int_keyed_map();
+        assert_eq!(
+            generator.generate_value(&v, &t),
+            "{ 404: \"missing\", 200: \"ok\" }"
+        );
+    }
 
     #[test]
     fn test_generate_integer() {

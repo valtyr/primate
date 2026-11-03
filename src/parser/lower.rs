@@ -13,6 +13,7 @@ use crate::ir::{Constant, EnumDef, EnumVariant, Module, SourceLocation, TypeAlia
 use crate::types::{
     Type, Value, is_screaming_snake_case, parse_duration, validate_regex, validate_url,
 };
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 #[derive(Debug, Default)]
@@ -27,11 +28,12 @@ pub struct ResolvedProject {
 struct EnumIndexEntry {
     #[allow(dead_code)]
     backing: EnumBacking,
-    variants: Vec<String>, // variant names in declaration order
+    /// `(name, backing value)` in declaration order. The value is the
+    /// explicit integer for int-backed enums and the string tag (name or
+    /// override) for untagged ones.
+    variants: Vec<(String, Value)>,
     #[allow(dead_code)]
     namespace: String,
-    /// `true` if integer-backed; `false` if string-tagged.
-    int_backed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -150,7 +152,6 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
                     };
 
                     let mut variants = Vec::new();
-                    let mut variant_names: Vec<String> = Vec::new();
                     let mut next_int: i128 = 0;
                     let mut seen_variants: HashMap<String, ()> = HashMap::new();
                     for v in &e.variants {
@@ -231,7 +232,6 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
                             name: v.name.clone(),
                             value,
                         });
-                        variant_names.push(v.name.clone());
                     }
 
                     let entry = EnumIndexEntry {
@@ -240,9 +240,11 @@ pub fn lower(files: Vec<ParsedFile>) -> ResolvedProject {
                         } else {
                             EnumBacking::Untagged
                         },
-                        variants: variant_names,
+                        variants: variants
+                            .iter()
+                            .map(|v| (v.name.clone(), v.value.clone()))
+                            .collect(),
                         namespace: namespace.clone(),
-                        int_backed,
                     };
                     enum_index.insert(key.clone(), (entry, source.clone()));
                     let doc = decl.doc.as_ref().map(|d| d.joined());
@@ -1193,21 +1195,36 @@ fn normalize_value(
                 None
             }
         },
-        Type::Map { value: vtyp, .. } => match &expr.kind {
+        Type::Map {
+            key: ktyp,
+            value: vtyp,
+        } => match &expr.kind {
             ValueExprKind::Map { entries, .. } => {
-                let mut map = HashMap::new();
+                // Source order is preserved (`IndexMap`) so generated output
+                // is stable across runs. Every entry is checked even after
+                // the first failure so all key/value errors surface at once.
+                let mut map = IndexMap::new();
+                let mut ok = true;
                 for (key, val) in entries {
-                    let k = match &key.kind {
-                        MapKeyKind::Str(s) => s.clone(),
-                        MapKeyKind::Ident(s) => s.clone(),
-                        MapKeyKind::Int(n) => n.to_string(),
-                    };
-                    map.insert(
-                        k,
-                        normalize_value(vtyp, val, enums, current_namespace, path, diags)?,
-                    );
+                    let k = normalize_map_key(ktyp, key, enums, path, diags);
+                    let v = normalize_value(vtyp, val, enums, current_namespace, path, diags);
+                    match (k, v) {
+                        (Some(k), Some(v)) => {
+                            if map.contains_key(&k) {
+                                diags.add(Diagnostic::error(
+                                    &source_loc(path, key.span),
+                                    "duplicate-key",
+                                    format!("duplicate map key `{}`", describe_map_key(key)),
+                                ));
+                                ok = false;
+                            } else {
+                                map.insert(k, v);
+                            }
+                        }
+                        _ => ok = false,
+                    }
                 }
-                Some(Value::Map(map))
+                if ok { Some(Value::Map(map)) } else { None }
             }
             _ => {
                 diags.add(Diagnostic::error(
@@ -1279,18 +1296,11 @@ fn normalize_value(
                     .map(|(_, (entry, _))| entry);
                 match lookup {
                     Some(entry) => {
-                        if entry.variants.iter().any(|v| v == &variant) {
-                            let value = if entry.int_backed {
-                                let _ = entry; // silence
-                                // Find variant index for integer-backed
-                                // (the index isn't our authority; use 0 and rely on generators using the name)
-                                Value::Integer(0)
-                            } else {
-                                Value::String(variant.clone())
-                            };
+                        if let Some((_, value)) = entry.variants.iter().find(|(v, _)| v == &variant)
+                        {
                             Some(Value::Enum {
                                 variant,
-                                value: Box::new(value),
+                                value: Box::new(value.clone()),
                             })
                         } else {
                             diags.add(Diagnostic::error(
@@ -1435,6 +1445,141 @@ fn byte_suffix_multiplier(suffix: &str) -> Option<i128> {
         "TiB" => 1024_i128 * 1024 * 1024 * 1024,
         _ => return None,
     })
+}
+
+/// Resolve one map-literal key against the declared key type. Returns the
+/// string form stored in `Value::Map`: the literal for string keys, the
+/// decimal form for integer keys, and the variant name for enum keys.
+fn normalize_map_key(
+    ktyp: &Type,
+    key: &MapKey,
+    enums: &HashMap<(String, String), (EnumIndexEntry, SourceLocation)>,
+    path: &std::path::Path,
+    diags: &mut Diagnostics,
+) -> Option<String> {
+    let loc = source_loc(path, key.span);
+    match ktyp {
+        // Bare identifiers are accepted as string keys (`{ http: 80 }`).
+        Type::String => match &key.kind {
+            MapKeyKind::Str(s) | MapKeyKind::Ident(s) => Some(s.clone()),
+            MapKeyKind::Int(n) => {
+                diags.add(Diagnostic::error(
+                    &loc,
+                    "type-mismatch",
+                    format!("map key `{}` is not a string (key type is `string`)", n),
+                ));
+                None
+            }
+        },
+        Type::I32 | Type::I64 | Type::U32 | Type::U64 => match &key.kind {
+            MapKeyKind::Int(n) => {
+                let (min, max, name) = int_range_for_type(ktyp).unwrap();
+                if *n < min || *n > max {
+                    diags.add(Diagnostic::error(
+                        &loc,
+                        "out-of-range",
+                        format!(
+                            "map key {} does not fit in {} (range: {}..={})",
+                            n, name, min, max
+                        ),
+                    ));
+                    return None;
+                }
+                Some(n.to_string())
+            }
+            _ => {
+                diags.add(Diagnostic::error(
+                    &loc,
+                    "type-mismatch",
+                    format!(
+                        "map key `{}` is not an integer (key type is `{}`)",
+                        describe_map_key(key),
+                        int_range_for_type(ktyp).unwrap().2
+                    ),
+                ));
+                None
+            }
+        },
+        Type::Enum { name, namespace } => {
+            let entry = enums
+                .get(&(namespace.clone(), name.clone()))
+                .or_else(|| enums.iter().find(|((_, n), _)| n == name).map(|(_, e)| e))
+                .map(|(entry, _)| entry);
+            let Some(entry) = entry else {
+                diags.add(Diagnostic::error(
+                    &loc,
+                    "unknown-type",
+                    format!("enum `{}` is not declared", name),
+                ));
+                return None;
+            };
+            match &key.kind {
+                MapKeyKind::Ident(v) => {
+                    if entry.variants.iter().any(|(n, _)| n == v) {
+                        Some(v.clone())
+                    } else {
+                        diags.add(Diagnostic::error(
+                            &loc,
+                            "invalid-enum-variant",
+                            format!("`{}` is not a variant of enum `{}`", v, name),
+                        ));
+                        None
+                    }
+                }
+                // A string or integer literal is never an enum key, but if it
+                // matches a variant's backing value, point at the variant.
+                MapKeyKind::Str(_) | MapKeyKind::Int(_) => {
+                    let literal = match &key.kind {
+                        MapKeyKind::Str(s) => Value::String(s.clone()),
+                        MapKeyKind::Int(n) => Value::Integer(*n),
+                        MapKeyKind::Ident(_) => unreachable!(),
+                    };
+                    let hint = entry
+                        .variants
+                        .iter()
+                        .find(|(_, val)| *val == literal)
+                        .map(|(n, _)| format!(" (did you mean `{}`?)", n))
+                        .unwrap_or_default();
+                    diags.add(Diagnostic::error(
+                        &loc,
+                        "invalid-enum-variant",
+                        format!(
+                            "map key `{}` must be a variant of enum `{}`, written as its name{}",
+                            describe_map_key(key),
+                            name,
+                            hint
+                        ),
+                    ));
+                    None
+                }
+            }
+        }
+        Type::Alias { .. } => {
+            diags.add(Diagnostic::error(
+                &loc,
+                "internal-error",
+                "alias key type was not resolved before value normalization".to_string(),
+            ));
+            None
+        }
+        _ => {
+            diags.add(Diagnostic::error(
+                &loc,
+                "unsupported-key-type",
+                "map keys must be strings, integers, or enum variants".to_string(),
+            ));
+            None
+        }
+    }
+}
+
+/// Render a map key the way the user wrote it, for diagnostics.
+fn describe_map_key(key: &MapKey) -> String {
+    match &key.kind {
+        MapKeyKind::Str(s) => format!("\"{}\"", s),
+        MapKeyKind::Ident(s) => s.clone(),
+        MapKeyKind::Int(n) => n.to_string(),
+    }
 }
 
 fn describe_value(kind: &ValueExprKind) -> String {
