@@ -107,10 +107,25 @@ submodule. Cross-namespace references become relative imports
 generator = "python"
 path      = "scripts/generated/constants/"
 options.typing = "runtime"           # or "stub" (emits a .pyi-style file)
+options.enumStyle = "str-mixin"      # or "strenum" (Python 3.11+)
+options.enumMapKeys = "enum"         # or "str"
 ```
 
 Durations become `timedelta`. Integer-backed enums become `IntEnum`
-subclasses; string-tagged enums become `(str, Enum)` subclasses.
+subclasses; string-tagged enums become `(str, Enum)` subclasses, or
+`StrEnum` subclasses with `enumStyle = "strenum"`. With `StrEnum`,
+`str(Status.PENDING)` and f-strings give the value (`"pending"`) rather
+than `Status.PENDING`.
+
+Maps keyed by a string-backed enum are annotated `Dict[Plan, V]` by
+default. `enumMapKeys = "str"` annotates them `Dict[str, V]` instead, so a
+type checker accepts lookups by a plain string (`SEATS.get(name)`) when
+the key comes from outside, such as JSON or user input. The keys are still
+emitted as enum members, and primate still rejects keys that aren't
+variants. Maps keyed by an integer-backed enum are unaffected.
+
+Float values always keep a decimal point (`f64 X = 5` emits `5.0`), so
+they are `float` at runtime.
 
 Python doesn't distinguish between integer widths — `i32`, `u32`,
 `i64`, and `u64` all land as `int`. Bounds checking happens at

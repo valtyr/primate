@@ -167,7 +167,7 @@ r[type.enum.rust.int]
 Rust outputs integer enums with `#[repr(i32)]` attribute.
 
 r[type.enum.python.string]
-Python outputs string enums as `class Status(str, Enum)`.
+Python outputs string enums as `class Status(str, Enum)`, or `class Status(StrEnum)` with `enumStyle = "strenum"`.
 
 r[type.enum.python.int]
 Python outputs integer enums as `class LogLevel(IntEnum)`.
@@ -231,6 +231,15 @@ Rust enums include `#[derive(Debug, Clone, Copy, PartialEq, Eq)]`.
 
 r[gen.python.typing-option]
 Python supports `typing` option: "runtime" (default) or "stub" (emit .pyi only).
+
+r[gen.python.enum-style-option]
+Python supports `enumStyle` option for string-backed enums: "str-mixin" (default, `class Status(str, Enum)`) or "strenum" (`class Status(StrEnum)`, Python 3.11+).
+
+r[gen.python.enum-map-keys-option]
+Python supports `enumMapKeys` option: "enum" (default, `Dict[Plan, V]`) or "str" (`Dict[str, V]` for maps keyed by a string-backed enum; keys are still emitted as enum members).
+
+r[gen.python.float-literals]
+Python emits float values with a decimal point (`5.0`, not `5`), so whole-number floats stay `float` at runtime.
 
 ## Plugin System
 
