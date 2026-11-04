@@ -56,10 +56,23 @@ impl LineTracker {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PythonGenerator {
     // r[impl gen.python.typing-option]
     pub typing: TypingStyle,
+    // r[impl gen.python.enum-style-option]
+    pub enum_style: EnumStyle,
+}
+
+/// Base class for string-backed enums.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum EnumStyle {
+    /// `class Status(str, Enum)`. Works on every Python 3 version.
+    #[default]
+    StrMixin,
+    /// `class Status(StrEnum)`. Python 3.11+; `str(member)` and f-strings
+    /// give the value (`"pending"`) instead of `Status.PENDING`.
+    StrEnum,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -77,6 +90,13 @@ impl PythonGenerator {
             generator.typing = match s.as_str() {
                 "stub" => TypingStyle::Stub,
                 _ => TypingStyle::Runtime,
+            };
+        }
+
+        if let Some(serde_json::Value::String(s)) = options.get("enumStyle") {
+            generator.enum_style = match s.as_str() {
+                "strenum" => EnumStyle::StrEnum,
+                _ => EnumStyle::StrMixin,
             };
         }
 
@@ -170,7 +190,15 @@ impl PythonGenerator {
                     }
                     .to_string()
                 } else {
-                    f.to_string()
+                    // r[impl gen.python.float-literals]
+                    // Rust prints whole floats without a decimal point
+                    // (`5`), which Python would read as an `int`.
+                    let s = f.to_string();
+                    if s.contains('.') {
+                        s
+                    } else {
+                        format!("{}.0", s)
+                    }
                 }
             }
             Value::Bool(b) => if *b { "True" } else { "False" }.to_string(),
@@ -268,24 +296,38 @@ impl PythonGenerator {
         let base_class = if enum_def.backing_type == "integer" {
             "IntEnum"
         } else {
-            "str, Enum"
+            match self.enum_style {
+                EnumStyle::StrMixin => "str, Enum",
+                EnumStyle::StrEnum => "StrEnum",
+            }
         };
 
         output.push_str(&format!("class {}({}):\n", name, base_class));
 
+        let (val_type, py_type) = if enum_def.backing_type == "integer" {
+            (Type::I32, "int")
+        } else {
+            (Type::String, "str")
+        };
         for variant in &enum_def.variants {
             let variant_name = to_screaming_snake_case(&variant.name);
-            let val_type = if enum_def.backing_type == "integer" {
-                Type::I32
-            } else {
-                Type::String
-            };
             output.push_str(&format!(
                 "    {} = {}\n",
                 variant_name,
                 self.generate_value(&variant.value, &val_type)
             ));
         }
+
+        // r[impl gen.python.enum-parse]
+        // Non-raising counterpart of `Plan("pro-plus")`, for values that
+        // arrive from outside the program (JSON, user input). Keeps lookups
+        // into enum-keyed maps honest: `SEATS[plan]` only type-checks once
+        // the caller has handled the `None` case.
+        output.push_str(&format!(
+            "\n    @classmethod\n    def parse(cls, value: {py}) -> Optional[\"{name}\"]:\n        \"\"\"Return the member whose value is ``value``, or ``None`` if there is none.\"\"\"\n        try:\n            return cls(value)\n        except ValueError:\n            return None\n",
+            py = py_type,
+            name = name,
+        ));
         output.push_str("\n\n");
 
         output
@@ -339,7 +381,10 @@ impl PythonGenerator {
         tracker.push_str("# Do not edit manually.\n\n");
 
         // Standard imports.
-        tracker.push_str("from enum import Enum, IntEnum\n");
+        match self.enum_style {
+            EnumStyle::StrMixin => tracker.push_str("from enum import Enum, IntEnum\n"),
+            EnumStyle::StrEnum => tracker.push_str("from enum import Enum, IntEnum, StrEnum\n"),
+        }
         tracker.push_str("from datetime import timedelta\n");
         tracker.push_str(
             "from typing import List, Dict, Tuple, Optional, Any, NamedTuple, TypeAlias\n",
@@ -600,5 +645,139 @@ mod tests {
             generator.generate_value(&v, &t),
             "{ 404: \"missing\", 200: \"ok\" }"
         );
+    }
+
+    fn plan_request(options: serde_json::Value) -> CodeGenRequest {
+        use crate::ir::{Constant, EnumVariant, SourceLocation};
+        let source = || SourceLocation {
+            file: "t.prim".into(),
+            line: 1,
+            column: 1,
+            length: None,
+        };
+        let (seats, seats_type) = seats_map();
+        CodeGenRequest {
+            version: 1,
+            output_path: "out".into(),
+            options: serde_json::from_value(options).unwrap(),
+            modules: vec![Module {
+                namespace: "t".into(),
+                source_file: "t.prim".into(),
+                doc: None,
+                constants: vec![
+                    Constant {
+                        name: "SEATS".into(),
+                        doc: None,
+                        typ: seats_type,
+                        value: seats,
+                        source: source(),
+                    },
+                    Constant {
+                        name: "LEVEL_RANK".into(),
+                        doc: None,
+                        typ: Type::Map {
+                            key: Box::new(Type::Enum {
+                                name: "Level".into(),
+                                namespace: "t".into(),
+                            }),
+                            value: Box::new(Type::U32),
+                        },
+                        value: Value::Map(indexmap::IndexMap::from([(
+                            "Low".to_string(),
+                            Value::Integer(0),
+                        )])),
+                        source: source(),
+                    },
+                ],
+            }],
+            enums: vec![
+                EnumDef {
+                    name: "Plan".into(),
+                    namespace: "t".into(),
+                    doc: None,
+                    variants: vec![
+                        EnumVariant {
+                            name: "Free".into(),
+                            value: Value::String("free".into()),
+                        },
+                        EnumVariant {
+                            name: "ProPlus".into(),
+                            value: Value::String("pro-plus".into()),
+                        },
+                    ],
+                    backing_type: "string".into(),
+                    source: source(),
+                },
+                EnumDef {
+                    name: "Level".into(),
+                    namespace: "t".into(),
+                    doc: None,
+                    variants: vec![EnumVariant {
+                        name: "Low".into(),
+                        value: Value::Integer(0),
+                    }],
+                    backing_type: "integer".into(),
+                    source: source(),
+                },
+            ],
+            aliases: vec![],
+        }
+    }
+
+    fn module_file(options: serde_json::Value) -> String {
+        let request = plan_request(options);
+        let generator = PythonGenerator::from_options(&request.options);
+        let response = generator.generate(&request);
+        response
+            .files
+            .into_iter()
+            .find(|f| f.path == "out/t.py")
+            .unwrap()
+            .content
+    }
+
+    #[test]
+    fn whole_floats_keep_a_decimal_point() {
+        let generator = PythonGenerator::default();
+        for (f, expected) in [
+            (5.0, "5.0"),
+            (0.0, "0.0"),
+            (-2.0, "-2.0"),
+            (0.125, "0.125"),
+            (1e20, "100000000000000000000.0"),
+        ] {
+            assert_eq!(
+                generator.generate_value(&Value::Float(f), &Type::F64),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn string_enums_default_to_str_mixin() {
+        let out = module_file(serde_json::json!({}));
+        assert!(out.contains("from enum import Enum, IntEnum\n"));
+        assert!(out.contains("class Plan(str, Enum):"));
+        assert!(out.contains("class Level(IntEnum):"));
+        assert!(out.contains("SEATS: Dict[Plan, int] = "));
+    }
+
+    #[test]
+    fn enum_style_strenum() {
+        let out = module_file(serde_json::json!({ "enumStyle": "strenum" }));
+        assert!(out.contains("from enum import Enum, IntEnum, StrEnum\n"));
+        assert!(out.contains("class Plan(StrEnum):"));
+        assert!(out.contains("class Level(IntEnum):"));
+    }
+
+    #[test]
+    fn enums_get_a_parse_classmethod_typed_by_backing() {
+        let out = module_file(serde_json::json!({}));
+        assert!(out.contains("    def parse(cls, value: str) -> Optional[\"Plan\"]:"));
+        assert!(out.contains("    def parse(cls, value: int) -> Optional[\"Level\"]:"));
+        assert!(out.contains("        except ValueError:\n            return None\n"));
+        // Map annotations stay honest: keys are the enum, not `str`.
+        assert!(out.contains("SEATS: Dict[Plan, int] = { Plan.FREE: 1, Plan.PRO_PLUS: 10 }"));
+        assert!(out.contains("LEVEL_RANK: Dict[Level, int] = "));
     }
 }

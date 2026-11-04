@@ -107,10 +107,33 @@ submodule. Cross-namespace references become relative imports
 generator = "python"
 path      = "scripts/generated/constants/"
 options.typing = "runtime"           # or "stub" (emits a .pyi-style file)
+options.enumStyle = "str-mixin"      # or "strenum" (Python 3.11+)
 ```
 
 Durations become `timedelta`. Integer-backed enums become `IntEnum`
-subclasses; string-tagged enums become `(str, Enum)` subclasses.
+subclasses; string-tagged enums become `(str, Enum)` subclasses, or
+`StrEnum` subclasses with `enumStyle = "strenum"`. With `StrEnum`,
+`str(Status.PENDING)` and f-strings give the value (`"pending"`) rather
+than `Status.PENDING`.
+
+Maps keyed by an enum are annotated `Dict[Plan, V]` and their keys are
+the enum members, so `SEATS[Plan.PRO_PLUS]` type-checks. When the key
+comes from outside the program (JSON, user input), convert it first
+rather than widening the annotation: `Plan(name)` raises `ValueError`
+for anything that isn't a variant, and every generated enum also has a
+non-raising `parse`:
+
+```python
+plan = Plan.parse(name)          # Optional[Plan]
+seats = SEATS[plan] if plan is not None else 0
+```
+
+Both work at runtime because `(str, Enum)` and `StrEnum` members are
+`str` instances, but the checker only accepts the lookup once the
+value has been narrowed to `Plan`.
+
+Float values always keep a decimal point (`f64 X = 5` emits `5.0`), so
+they are `float` at runtime.
 
 Python doesn't distinguish between integer widths — `i32`, `u32`,
 `i64`, and `u64` all land as `int`. Bounds checking happens at

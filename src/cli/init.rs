@@ -483,7 +483,10 @@ fn target_options(target: BuiltinTarget) -> &'static [(&'static str, &'static st
             "pub",
             "or \"pub(crate)\", \"pub(super)\", \"\"",
         )],
-        BuiltinTarget::Python => &[("typing", "runtime", "or \"stub\" for a .pyi-style file")],
+        BuiltinTarget::Python => &[
+            ("typing", "runtime", "or \"stub\" for a .pyi-style file"),
+            ("enumStyle", "str-mixin", "or \"strenum\" (Python 3.11+)"),
+        ],
     }
 }
 
