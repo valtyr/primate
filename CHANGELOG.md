@@ -5,6 +5,26 @@ All notable changes to **primate** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/valtyr/primate/compare/v0.3.3...v0.4.0) - 2026-11-04
+
+### Added
+
+- *(python)* StrEnum and str-keyed enum map options, keep floats as floats
+
+### Fixed
+
+- *(lsp)* find primate.toml above the open document at any depth
+
+### Other
+
+- Merge pull request #20 from ingisteinn/python-strenum-and-float-literals
+- Merge pull request #18 from valtyr/chore/gitattributes-rust-highlighting
+- replace enumMapKeys with a generated parse() classmethod
+- *(lsp)* appease clippy in upward-walk test
+- use Zig rather than Rust for .prim highlighting on GitHub
+- recommend .gitattributes Rust highlighting for .prim files
+- highlight .prim files as Rust on GitHub
+
 ## [0.3.3](https://github.com/valtyr/primate/compare/v0.3.2...v0.3.3) - 2026-11-03
 
 ### Fixed
